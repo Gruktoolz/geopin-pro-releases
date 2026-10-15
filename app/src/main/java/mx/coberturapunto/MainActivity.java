@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private boolean ready;
     private int loadGeneration;
     private String mapBootstrap;
+    private boolean providerUnsupported;
     private boolean autoQueryPending;
     private static final long CACHE_BUDGET_BYTES=8L*1024*1024;
     private final android.os.Handler cacheHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -211,7 +212,7 @@ public class MainActivity extends Activity {
                 // Keep only the coverage site as a top-level page; its resource and CAPTCHA frames still load normally.
                 return request.isForMainFrame() && !trusted(request.getUrl());
             }
-            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){setBusy(true,"Cargando mapa");loadGeneration++;ready=false;center.setEnabled(false);captureButton.setEnabled(true);}
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){setBusy(true,"Cargando mapa");loadGeneration++;ready=false;providerUnsupported=false;center.setEnabled(false);captureButton.setEnabled(true);}
             @Override public void onPageCommitVisible(WebView view,String url){if(trusted(Uri.parse(url)))prepareMap(loadGeneration,0);}
             @Override public void onPageFinished(WebView view,String url){
                 if(!trusted(Uri.parse(url))) return;
@@ -332,6 +333,11 @@ public class MainActivity extends Activity {
                     getIntent().removeExtra("integration_test");web.evaluateJavascript(asset("integration-test.js"),null);
                 }
             }else if(attempt<120)web.postDelayed(()->prepareMap(generation,attempt+1),250);
+            else if(!mapEngine.provider.coverageEnabled()){
+                providerUnsupported=true;
+                setBusy(false,"Mapa abierto; posicionamiento no disponible en este sitio");
+                if(autoQueryPending)showError("Este sitio no expone un mapa compatible. Puedes navegar y guardar capturas.");
+            }
         });
     }
     // API 33+ uses the OnBackInvokedDispatcher registered in onCreate; this is only the legacy path.
@@ -493,7 +499,10 @@ public class MainActivity extends Activity {
         query();
     }
     private void query(){
-        if(!ready || pending==null) return;
+        if(!ready || pending==null){
+            if(providerUnsupported)showError("Este sitio no expone un mapa compatible. Puedes navegar y guardar capturas.");
+            return;
+        }
         if(currentQueryId==null || currentQueryId.isEmpty()){
             currentQueryId=java.util.UUID.randomUUID().toString();
             mapEngine.startQuery(currentQueryId);

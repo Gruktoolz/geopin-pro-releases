@@ -4,6 +4,7 @@ if(!window.__mapProvider || location.origin!==window.__mapProvider.origin || win
   // Hook Leaflet from the very instant it is defined to disable updateWhenIdle and expand keepBuffer
   let _leaflet = undefined;
   function patchLeaflet(l) {
+    if(window.__mapDiscovery)window.__mapDiscovery.leaflet(l);
     if (!l || !l.GridLayer || !l.GridLayer.prototype) return;
     try {
       l.GridLayer.prototype.options.updateWhenIdle = false;

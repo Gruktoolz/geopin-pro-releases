@@ -9,7 +9,7 @@ final class ProviderRegistry {
  private static ProviderRegistry createDefault(){
   ProviderRegistry r=new ProviderRegistry();
   r.register(new ConfiguredMapProvider("coverage-v1",EndpointCatalog.map_origin(),"coverage-adapter.js",new CoverageTileProfile(),"domGeo",".leaflet-control-locate a"));
-  r.register(new ConfiguredMapProvider("leaflet-v1",EndpointCatalog.leaflet_origin(),"leaflet-adapter.js",null));
+  r.register(new ConfiguredMapProvider("leaflet-v1",EndpointCatalog.leaflet_origin(),"map-adapter.js",null));
   return r;
  }
  synchronized void register(MapProvider provider){
@@ -25,7 +25,11 @@ final class ProviderRegistry {
  }
  synchronized MapProvider resolve(URI uri){
   for(MapProvider provider:providers.values())if(provider.accepts(uri))return provider;
-  throw new IllegalArgumentException("Introduce el enlace HTTPS de un mapa compatible.");
+  if(!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost()==null || uri.getHost().isBlank()
+     || uri.getRawUserInfo()!=null || (uri.getPort()!=-1 && uri.getPort()!=443))
+   throw new IllegalArgumentException("Introduce un enlace HTTPS válido para el mapa.");
+  String origin="https://"+uri.getHost().toLowerCase(java.util.Locale.ROOT);
+  return new ConfiguredMapProvider("generic-web",origin,"map-adapter.js",null);
  }
 }
 final class ConfiguredMapProvider implements MapProvider {

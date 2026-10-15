@@ -9,7 +9,7 @@ final class WebEngine {
  String documentStart(){
   String config="Object.defineProperty(window,'__mapProvider',{value:Object.freeze({origin:"
    +JSONObject.quote(provider.origin())+",blurElement:"+JSONObject.quote(provider.blurElement())+",locateControl:"+JSONObject.quote(provider.locateControl())+"}),configurable:false});\n";
-  return "if(location.origin==="+JSONObject.quote(provider.origin())+"){"+config+asset("virtual-location.js")+";\n"+asset("webview-optimizations.js")+"}";
+  return "if(location.origin==="+JSONObject.quote(provider.origin())+"){"+config+asset("virtual-location.js")+";\n"+(provider.coverageEnabled()?"":asset("map-discovery.js"))+";\n"+asset("webview-optimizations.js")+"}";
  }
  String bootstrap(){return asset("viewport-stability.js")+";\n"+asset("location-feedback.js")+";\n"+asset(provider.adapterAsset())+";!!(window.__coverageAdapter && window.__coverageAdapter.ready());";}
  private String asset(String name){
