@@ -4,7 +4,7 @@
 
 Explora un punto sin desplazarte. GeoPin Pro te permite introducir coordenadas o compartir un enlace de ubicación, situar el punto en un mapa compatible y guardar una captura para consultarla o compartirla. Con reconocimiento de mapas de cobertura y una interfaz nativa de Android.
 
-[**Descargar para Android**](https://github.com/andresmegatj-ui/geopin-pro-releases/releases/latest)
+[**Descargar para Android**](https://github.com/Gruktoolz/geopin-pro-releases/releases/latest)
 
 ## Del enlace al punto
 
