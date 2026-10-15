@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "packageName": "mx.coberturapunto",
-  "latestVersionCode": 28,
-  "latestVersionName": "1.0.3",
-  "minSupportedVersionCode": 28,
-  "downloadUrl": "https://github.com/andresmegatj-ui/geopin-pro-releases/releases/download/v1.0.3/GeoPin-Pro-1.0.3.apk",
-  "sha256": "563f20102e462a9113a528bab11dcdf460eb56b0843c399a72f0c884e839776e",
-  "sizeBytes": 3912507,
-  "notes": "Nueva version de GeoPin Pro. Actualiza para continuar."
+  "latestVersionCode": 29,
+  "latestVersionName": "1.0.4",
+  "minSupportedVersionCode": 29,
+  "sha256": "1e806b9a2518beb45f88bb8d716c68d578d0f8a0a3797cec4f2ca4f4d9420f59",
+  "sizeBytes": 3912483,
+  "notes": "Nueva version de GeoPin Pro. Actualiza para continuar.",
+  "downloadUrl": "https://github.com/andresmegatj-ui/geopin-pro-releases/releases/download/v1.0.4/GeoPin-Pro-1.0.4.apk"
 }
