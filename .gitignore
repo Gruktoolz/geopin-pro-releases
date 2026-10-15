@@ -1,0 +1,12 @@
+.gradle/
+build/
+app/build/
+local.properties
+
+# Private signing material and credentials
+keystore.properties
+*.keystore
+*.jks
+*.p12
+.env
+.env.*
