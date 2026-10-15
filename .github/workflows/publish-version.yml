@@ -20,7 +20,7 @@ jobs:
         run: |
           import base64, glob, hashlib, json, os, pathlib, re, subprocess, tempfile, urllib.request
           repo = os.environ['GITHUB_REPOSITORY']
-          assert repo.lower() in {'andresmegatj-ui/geopin-pro-releases', 'gruktoolz/geopin-pro-releases'}
+          assert repo.lower() == 'gruktoolz/geopin-pro-releases'
           base = 'https://api.github.com/repos/' + repo
           def api(path, body=None):
               headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
