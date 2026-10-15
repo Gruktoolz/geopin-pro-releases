@@ -20,7 +20,7 @@ jobs:
         run: |
           import base64, glob, hashlib, json, os, pathlib, re, subprocess, tempfile, urllib.request
           repo = os.environ['GITHUB_REPOSITORY']
-          assert repo == 'andresmegatj-ui/geopin-pro-releases'
+          assert repo.lower() in {'andresmegatj-ui/geopin-pro-releases', 'gruktoolz/geopin-pro-releases'}
           base = 'https://api.github.com/repos/' + repo
           def api(path, body=None):
               headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
@@ -63,17 +63,23 @@ jobs:
               fingerprints = re.findall(r'^.*certificate SHA-256 digest: ([0-9a-fA-F:]+)', cert, re.M)
               assert fingerprints and {v.replace(':', '').lower() for v in fingerprints} == {'2f0b678dd0f4ddb337f3614e337ce88d59c1afe3b3cfc294ede7ff6d4b533d00'}, 'Firma no autorizada.'
               assert not re.search(r'^Signer #2 ', cert, re.M)
-          try:
-              current = api('/contents/version.json?ref=main')
-              previous = json.loads(base64.b64decode(current['content']))
-              assert code >= previous['latestVersionCode'], 'Una release antigua no puede reemplazar a la vigente.'
-              sha = current['sha']
-          except urllib.error.HTTPError as e:
-              if e.code != 404: raise
-              sha = None
-          manifest = {'schemaVersion': 1, 'packageName': 'mx.coberturapunto', 'latestVersionCode': code, 'latestVersionName': name, 'minSupportedVersionCode': code, 'downloadUrl': asset['browser_download_url'], 'sha256': digest.hexdigest(), 'sizeBytes': size, 'notes': 'Nueva version de GeoPin Pro. Actualiza para continuar.'}
-          content = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode()
-          payload = {'message': 'Publicar metadatos de GeoPin Pro ' + name, 'branch': 'main', 'content': base64.b64encode(content).decode()}
-          if sha: payload['sha'] = sha
-          api('/contents/version.json', payload)
-          print('version.json publicado para GeoPin Pro ' + name + ', compilacion ' + str(code))
+          manifest = {'schemaVersion': 1, 'packageName': 'mx.coberturapunto', 'latestVersionCode': code, 'latestVersionName': name, 'minSupportedVersionCode': code, 'sha256': digest.hexdigest(), 'sizeBytes': size, 'notes': 'Nueva version de GeoPin Pro. Actualiza para continuar.'}
+          suffix = asset['browser_download_url'][len(expected_prefix):]
+          canonical = dict(manifest, downloadUrl='https://github.com/Gruktoolz/geopin-pro-releases/releases/download/' + suffix)
+          legacy = dict(manifest, downloadUrl='https://github.com/andresmegatj-ui/geopin-pro-releases/releases/download/' + suffix)
+          def publish_manifest(filename, value):
+              try:
+                  current = api('/contents/' + filename + '?ref=main')
+                  previous = json.loads(base64.b64decode(current['content']))
+                  assert code >= previous['latestVersionCode'], 'No se permite degradar la version publicada.'
+                  sha = current['sha']
+              except urllib.error.HTTPError as e:
+                  if e.code != 404: raise
+                  sha = None
+              content = (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode()
+              payload = {'message': 'Publicar ' + filename + ' de GeoPin Pro ' + name, 'branch': 'main', 'content': base64.b64encode(content).decode()}
+              if sha: payload['sha'] = sha
+              api('/contents/' + filename, payload)
+          publish_manifest('updates.json', canonical)
+          publish_manifest('version.json', legacy)
+          print('Manifiestos de GeoPin Pro ' + name + ' publicados: Gruktoolz y compatibilidad de migracion.')
