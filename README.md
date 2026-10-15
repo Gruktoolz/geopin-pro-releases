@@ -2,7 +2,7 @@
 
 ### Geoposición virtual, simple y precisa.
 
-Explora un punto sin desplazarte. GeoPin Pro te permite introducir coordenadas o compartir un enlace de ubicación, situar el punto en un mapa compatible y guardar una captura para consultarla o compartirla. Todo desde una interfaz nativa de Android.
+Explora un punto sin desplazarte. GeoPin Pro te permite introducir coordenadas o compartir un enlace de ubicación, situar el punto en un mapa compatible y guardar una captura para consultarla o compartirla. Con reconocimiento de mapas de cobertura y una interfaz nativa de Android.
 
 [**Descargar para Android**](https://github.com/andresmegatj-ui/geopin-pro-releases/releases/latest)
 
@@ -19,14 +19,15 @@ El enlace queda guardado para los siguientes inicios y puedes cambiarlo desde el
 - Posicionamiento virtual dentro del visor, sin utilizar la ubicación real del teléfono.
 - Entrada de coordenadas y enlaces de mapas, búsqueda de direcciones y memoria de consultas.
 - Ajuste del punto al centro del mapa y capturas desde la aplicación.
-- Interfaz nativa, icono adaptativo y optimizaciones de carga para mantener una respuesta ágil.
+- Reconocimiento visual de mapas de cobertura compatibles.
+- Interfaz nativa, icono adaptativo y optimización general para mantener una respuesta ágil.
 - Actualizaciones integradas: las nuevas versiones estables publicadas son obligatorias al detectarse. Android solicita confirmar la instalación.
 
 ## Compatibilidad y alcance
 
 La geoposición virtual se aplica al mapa dentro de GeoPin Pro; no cambia el GPS de Android ni la ubicación de otras aplicaciones.
 
-La versión actual incorpora una integración específica con el mapa de cobertura de Megacable. El enlace lo configura el usuario, pero la detección de cobertura y algunas optimizaciones siguen dependiendo de ese mapa y de sus servicios. No se ofrece compatibilidad universal con cualquier sitio.
+El reconocimiento de cobertura funciona con la integración de mapa actualmente compatible y depende de sus datos y servicios. Guardar un enlace no garantiza compatibilidad con cualquier sitio.
 
 GeoPin Pro es una herramienta independiente y no una aplicación oficial del proveedor del mapa. Los datos, marcas y contenidos del sitio conservan su procedencia.
 
