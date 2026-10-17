@@ -37,4 +37,4 @@ Descarga el APK firmado de la última versión e instálalo sobre la anterior, s
 
 La comprobación de actualizaciones requiere conexión y se realiza al abrir el visor y mientras permanece abierto. Las versiones antiguas que no incorporan el actualizador requieren instalación manual.
 
-Este repositorio distribuye únicamente el APK firmado y la configuración de versiones. El código fuente de la aplicación y las claves de firma permanecen privados.
+Este repositorio incluye el código fuente, sus historiales conservados, el APK firmado y la configuración de versiones. Las claves de firma y credenciales permanecen privadas. Consulta la [comparación y verificación de 1.0.9](docs/ACTUALIZACION-1.0.9.md) para conocer los cambios, pruebas y límites de funcionamiento offline.
