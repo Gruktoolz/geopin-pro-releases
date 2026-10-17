@@ -1,0 +1,85 @@
+name: Publicar version del APK
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: geopin-version-manifest
+  cancel-in-progress: false
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Comprobar APK firmado y publicar version.json
+        shell: python
+        run: |
+          import base64, glob, hashlib, json, os, pathlib, re, subprocess, tempfile, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          assert repo.lower() == 'gruktoolz/geopin-pro-releases'
+          base = 'https://api.github.com/repos/' + repo
+          def api(path, body=None):
+              headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+              data = json.dumps(body).encode() if body is not None else None
+              if data is not None: headers['Content-Type'] = 'application/json'
+              request = urllib.request.Request(base + path, data=data, headers=headers, method='PUT' if data is not None else 'GET')
+              with urllib.request.urlopen(request, timeout=45) as r: return json.load(r)
+          release = api('/releases/latest')
+          assert not release['draft'] and not release['prerelease']
+          apks = [a for a in release['assets'] if re.fullmatch(r'GeoPin-Pro-[0-9]+\.[0-9]+\.[0-9]+\.apk', a['name'])]
+          assert len(apks) == 1, 'Publica exactamente un APK GeoPin-Pro-x.y.z.apk en la release estable.'
+          asset = apks[0]
+          assert 0 < asset['size'] <= 200 * 1024 * 1024
+          expected_prefix = 'https://github.com/' + repo + '/releases/download/'
+          assert asset['browser_download_url'].startswith(expected_prefix)
+          tools = glob.glob(os.environ['ANDROID_HOME'] + '/build-tools/*/aapt')
+          assert tools, 'Faltan las herramientas de Android del runner.'
+          aapt = sorted(tools, key=lambda x: [int(v) if v.isdigit() else 0 for v in pathlib.Path(x).parent.name.split('.')])[-1]
+          signer = str(pathlib.Path(aapt).with_name('apksigner'))
+          with tempfile.TemporaryDirectory() as temp:
+              apk = pathlib.Path(temp) / 'release.apk'
+              digest, size = hashlib.sha256(), 0
+              request = urllib.request.Request(asset['browser_download_url'], headers={'User-Agent': 'GeoPinPro-Release-Validator/1'})
+              with urllib.request.urlopen(request, timeout=90) as r, apk.open('wb') as out:
+                  while True:
+                      chunk = r.read(65536)
+                      if not chunk: break
+                      size += len(chunk)
+                      assert size <= asset['size'], 'El APK excede el tamaño publicado.'
+                      digest.update(chunk)
+                      out.write(chunk)
+              assert size == asset['size']
+              badging = subprocess.check_output([aapt, 'dump', 'badging', str(apk)], text=True)
+              match = re.search(r"^package: name='([^']+)' versionCode='([0-9]+)' versionName='([^']+)'", badging, re.M)
+              assert match and match[1] == 'mx.coberturapunto', 'El APK no es GeoPin Pro.'
+              code, name = int(match[2]), match[3]
+              assert asset['name'] == 'GeoPin-Pro-' + name + '.apk'
+              cert = subprocess.check_output([signer, 'verify', '--print-certs', str(apk)], text=True)
+              print(cert)
+              fingerprints = re.findall(r'^.*certificate SHA-256 digest: ([0-9a-fA-F:]+)', cert, re.M)
+              assert fingerprints and {v.replace(':', '').lower() for v in fingerprints} == {'2f0b678dd0f4ddb337f3614e337ce88d59c1afe3b3cfc294ede7ff6d4b533d00'}, 'Firma no autorizada.'
+              assert not re.search(r'^Signer #2 ', cert, re.M)
+          manifest = {'schemaVersion': 1, 'packageName': 'mx.coberturapunto', 'latestVersionCode': code, 'latestVersionName': name, 'minSupportedVersionCode': code, 'sha256': digest.hexdigest(), 'sizeBytes': size, 'notes': 'Nueva version de GeoPin Pro. Actualiza para continuar.'}
+          suffix = asset['browser_download_url'][len(expected_prefix):]
+          canonical = dict(manifest, downloadUrl='https://github.com/Gruktoolz/geopin-pro-releases/releases/download/' + suffix)
+          legacy = dict(manifest, downloadUrl='https://github.com/andresmegatj-ui/geopin-pro-releases/releases/download/' + suffix)
+          def publish_manifest(filename, value):
+              try:
+                  current = api('/contents/' + filename + '?ref=main')
+                  previous = json.loads(base64.b64decode(current['content']))
+                  assert code >= previous['latestVersionCode'], 'No se permite degradar la version publicada.'
+                  sha = current['sha']
+              except urllib.error.HTTPError as e:
+                  if e.code != 404: raise
+                  sha = None
+              content = (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode()
+              payload = {'message': 'Publicar ' + filename + ' de GeoPin Pro ' + name, 'branch': 'main', 'content': base64.b64encode(content).decode()}
+              if sha: payload['sha'] = sha
+              api('/contents/' + filename, payload)
+          publish_manifest('updates.json', canonical)
+          publish_manifest('version.json', legacy)
+          print('Manifiestos de GeoPin Pro ' + name + ' publicados: Gruktoolz y compatibilidad de migracion.')

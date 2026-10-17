@@ -1,27 +1,40 @@
-# GeoPin Pro Engine
+# GeoPin Pro
 
-Motor Android de geoposición virtual dentro de una WebView. El enlace se configura al iniciar; no modifica el GPS del dispositivo.
+### Geoposición virtual, simple y precisa.
 
-## Arquitectura
+Explora un punto sin desplazarte. GeoPin Pro te permite introducir coordenadas o compartir un enlace de ubicación, situar el punto en un mapa compatible y guardar una captura para consultarla o compartirla. Con reconocimiento de mapas de cobertura y una interfaz nativa de Android.
 
-- MapEngine: sesión y capacidades del proveedor seleccionado.
-- ProviderRegistry / MapProvider: registro explícito por origen HTTPS, adaptador y capacidades. Incluye un perfil de cobertura raster y un adaptador general para Leaflet, MapLibre/Mapbox y OpenLayers, sin verificación de cobertura. Permite guardar nuevos enlaces HTTPS sin archivos de configuración. La integración requiere un objeto de mapa accesible o una instancia Leaflet descubierta al inicializarse; los mapas privados encapsulados o dentro de iframes de otro origen se abren para navegar y capturar, sin prometer posicionamiento.
-- WebEngine: composición de scripts y aislamiento del puente por origen.
-- WebViewOptimizations / webview-optimizations.js: reglas comunes de rendimiento.
-- CoverageTileProfile: construcción de solicitudes y reconocimiento de teselas del perfil raster.
-- AppTelemetry / TelemetryBackend: eventos y transporte intercambiable. JsonHttpTelemetryBackend mantiene el contrato JSON existente. La telemetría de puntos conserva coordenadas exactas, identificador de instalación y estado de verificación; no debe presentarse como anónima.
-- EndpointCatalog: valores codificados, reconstruidos en ejecución. La codificación no es cifrado ni hace secretos los destinos o las credenciales incluidas en una aplicación cliente.
+[**Descargar para Android**](https://github.com/Gruktoolz/geopin-pro-releases/releases/latest)
 
-## Compilación privada
+## Del enlace al punto
 
-JDK 17, Android SDK 36. Configura local.properties fuera de Git. Para release usa GEOPIN_STORE_FILE, GEOPIN_STORE_PASSWORD, GEOPIN_KEY_ALIAS y GEOPIN_KEY_PASSWORD, o keystore.properties ignorado. La clave de producción no se incluye en este proyecto exportado. Ejecuta ./gradlew :app:assembleRelease :app:testDebugUnitTest :app:lintRelease.
+1. Añade una vez el enlace de tu mapa compatible.
+2. Introduce una dirección, unas coordenadas o comparte una ubicación con GeoPin Pro.
+3. Ajusta el centro del mapa y guarda la captura que necesitas.
 
-La identidad Android y la firma de producción se conservan para permitir actualización. El canal de actualización existente conserva su contrato y verificación de integridad; esta carpeta no publica ninguna release ni fuente. No se ha trasladado historial del proyecto anterior.
+El enlace queda guardado para los siguientes inicios y puedes cambiarlo desde el menú del mapa.
 
-## Nuevos enlaces
+## Diseñada para trabajar con ubicaciones
 
-Usa el mismo menú «Cambiar enlace del mapa», pega un enlace HTTPS y guarda. Solo hay un mapa activo, como antes; cambiar el enlace selecciona automáticamente el adaptador. No se importan archivos ni se añaden pantallas.
+- Posicionamiento virtual dentro del visor, sin utilizar la ubicación real del teléfono.
+- Entrada de coordenadas y enlaces de mapas, búsqueda de direcciones y memoria de consultas.
+- Ajuste del punto al centro del mapa y capturas desde la aplicación.
+- Reconocimiento visual de mapas de cobertura compatibles.
+- Interfaz nativa, icono adaptativo y optimización general para mantener una respuesta ágil.
+- Actualizaciones integradas: las nuevas versiones estables publicadas son obligatorias al detectarse. Android solicita confirmar la instalación.
 
-El adaptador general admite posicionamiento en instancias Leaflet detectadas y objetos de mapa accesibles de MapLibre/Mapbox u OpenLayers (EPSG:4326 y EPSG:3857). La navegación y las capturas siguen disponibles para páginas cuyos mapas no pueden controlarse. Mapas encapsulados, proyecciones diferentes, controles propios y contenido dentro de iframes de otro origen pueden requerir un adaptador específico. No se interpreta su color como cobertura.
+## Compatibilidad y alcance
 
-Pruebas JS: ejecuta los cuatro archivos tests/*.test.cjs con Node. La prueba Android offline usa la biblioteca oficial Leaflet 1.9.4, incluida solo en la variante debug, y no envía telemetría ni descarga teselas.
+La geoposición virtual se aplica al mapa dentro de GeoPin Pro; no cambia el GPS de Android ni la ubicación de otras aplicaciones.
+
+El reconocimiento de cobertura funciona con la integración de mapa actualmente compatible y depende de sus datos y servicios. Guardar un enlace no garantiza compatibilidad con cualquier sitio.
+
+GeoPin Pro es una herramienta independiente y no una aplicación oficial del proveedor del mapa. Los datos, marcas y contenidos del sitio conservan su procedencia.
+
+## Instalación y actualizaciones
+
+Descarga el APK firmado de la última versión e instálalo sobre la anterior, sin desinstalar, para conservar tus datos. Si Android lo solicita, autoriza la instalación desde la aplicación que estés utilizando.
+
+La comprobación de actualizaciones requiere conexión y se realiza al abrir el visor y mientras permanece abierto. Las versiones antiguas que no incorporan el actualizador requieren instalación manual.
+
+Este repositorio distribuye únicamente el APK firmado y la configuración de versiones. El código fuente de la aplicación y las claves de firma permanecen privados.
