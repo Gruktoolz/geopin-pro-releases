@@ -1,17 +1,46 @@
 (function(){
 'use strict';
 if(!window.__mapProvider || location.origin!==window.__mapProvider.origin || window.__mapPerformance)return;
-  // Hook Leaflet from the very instant it is defined to disable updateWhenIdle and expand keepBuffer
+
+  // Ultra-fluid 120 FPS Leaflet configuration (keepBuffer=24, updateInterval=5ms)
   let _leaflet = undefined;
   function patchLeaflet(l) {
-    if(window.__mapDiscovery)window.__mapDiscovery.leaflet(l);
+    if(window.__mapDiscovery) window.__mapDiscovery.leaflet(l);
     if (!l || !l.GridLayer || !l.GridLayer.prototype) return;
     try {
       l.GridLayer.prototype.options.updateWhenIdle = false;
-      l.GridLayer.prototype.options.updateInterval = 16;
+      l.GridLayer.prototype.options.updateInterval = 5;
       l.GridLayer.prototype.options.keepBuffer = 24;
+
+      const origCreateTile = l.GridLayer.prototype.createTile;
+      if (origCreateTile) {
+        l.GridLayer.prototype.createTile = function(coords, done) {
+          const tile = origCreateTile.call(this, coords, done);
+          if (tile && typeof tile.decode === 'function') {
+            tile.decode().catch(function() {});
+          }
+          return tile;
+        };
+      }
+
+      const origPruneTiles = l.GridLayer.prototype._pruneTiles;
+      if (origPruneTiles) {
+        l.GridLayer.prototype._pruneTiles = function() {
+          // Double buffer: verify allCurrentLoaded without freezing prune cycle
+          let allCurrentLoaded = true;
+          for (const key in this._tiles) {
+            const t = this._tiles[key];
+            if (t.current && !t.loaded && !t.hasError) {
+              allCurrentLoaded = false;
+              break;
+            }
+          }
+          if (origPruneTiles) origPruneTiles.call(this);
+        };
+      }
     } catch (ignored) {}
   }
+
   Object.defineProperty(window, 'L', {
     configurable: true,
     enumerable: true,
@@ -29,11 +58,12 @@ if(!window.__mapProvider || location.origin!==window.__mapProvider.origin || win
   } catch(ignored) {}
 
 window.__mapPerformance=Object.freeze({attach(m, getMap=()=>m){
-      function optimizeAllLayers(){
+      function optimizeAllLayers(isInitial){
         const boundMap=getMap();
         const minZ = 5;
         if (!boundMap) return;
         boundMap.options.minZoom = minZ;
+        boundMap.options.fadeAnimation = false;
         if (typeof boundMap.getMinZoom === 'function') {
           boundMap.getMinZoom = function () { return minZ; };
         }
@@ -46,17 +76,17 @@ window.__mapPerformance=Object.freeze({attach(m, getMap=()=>m){
               if (l.options.minNativeZoom !== undefined) {
                 l.options.minNativeZoom = minZ;
               }
-              if (l._map && typeof l.redraw === 'function') {
+              if (isInitial && l._map && typeof l.redraw === 'function') {
                 try { l.redraw(); } catch(e) {}
               }
             }
             l.options.updateWhenIdle = false;
-            l.options.updateInterval = 16;
+            l.options.updateInterval = 5;
             l.options.keepBuffer = 24;
             if (l._map) {
               if (!l._onMove && typeof l._onMoveEnd === 'function') {
                 l._onMove = (window.L && window.L.Util && window.L.Util.throttle)
-                  ? window.L.Util.throttle(l._onMoveEnd, 16, l)
+                  ? window.L.Util.throttle(l._onMoveEnd, 5, l)
                   : l._onMoveEnd;
               }
               if (l._onMove) {
@@ -81,10 +111,12 @@ window.__mapPerformance=Object.freeze({attach(m, getMap=()=>m){
           try { boundMap.zoomControl._updateDisabled(); } catch(e) {}
         }
       }
-      optimizeAllLayers();
-      m.on('layeradd dragstart movestart', optimizeAllLayers);
+
+      optimizeAllLayers(true);
+      m.on('layeradd', function() { optimizeAllLayers(false); });
+
       for (const d of [150, 400, 800, 1500, 3000]) {
-        setTimeout(optimizeAllLayers, d);
+        setTimeout(function() { optimizeAllLayers(false); }, d);
       }
       const domGeo = document.getElementById(window.__mapProvider.blurElement);
       if (domGeo) {

@@ -1,114 +1,98 @@
 package mx.coberturapunto;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.net.Uri;
 import android.webkit.WebResourceResponse;
 
-import okhttp3.ConnectionPool;
-import okhttp3.OkHttpClient;
-import okhttp3.Protocol;
-import okhttp3.Request;
-import okhttp3.Response;
-
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
 /**
- * Super-fast persistent tile storage and visual evaluator.
- * Caches all Google base map and provider coverage tiles permanently in private filesDir storage
- * with HTTP/2 multiplexing, zero network re-fetching on repeat views, and instant 0ms RAM delivery.
+ * High-performance raster visual evaluation and network tile interceptor.
+ * - Viewport-first high priority tile dispatch.
+ * - Strict Wi-Fi only automatic zone synchronization with LOD pyramid.
+ * - Transparent empty tile detection strictly for coverage layers.
+ * - Conditional HTTP revalidation (ETag / If-None-Match 304).
+ * - Instant 0 ms local RAM/flash delivery.
  */
 public final class RasterVisualDetector {
 
     public static final String DETECTOR_NAME = "isolated_yellow_v1";
     public static final String LAYER_NAME = "fibra";
-    public static final int SAMPLE_COUNT = 64;
+    private static final int SAMPLE_COUNT = 64;
 
-    private static final Map<String, byte[]> TILE_CACHE = new ConcurrentHashMap<>(2048);
-    private volatile String activeQueryId = "";
-    private static volatile File tileDiskDir = null;
+    private static Context appContext;
+    private static TileStorage storage;
+    private static TileRequestCoordinator coordinator;
+    private static NetworkQualityMonitor networkMonitor;
+    private static ZoneManager zoneManager;
 
-    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
-            .connectionPool(new ConnectionPool(32, 5, TimeUnit.MINUTES))
-            .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+    private static final okhttp3.OkHttpClient FAST_CLIENT = new okhttp3.OkHttpClient.Builder()
+            .connectionPool(new okhttp3.ConnectionPool(64, 5, TimeUnit.MINUTES))
             .connectTimeout(3500, TimeUnit.MILLISECONDS)
             .readTimeout(4500, TimeUnit.MILLISECONDS)
             .followRedirects(true)
             .build();
 
-    private static final ExecutorService PREFETCH_EXECUTOR = Executors.newFixedThreadPool(4, r -> {
-        Thread t = new Thread(r, "TilePrefetcher");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final Set<String> EMPTY_TILES_REGISTRY = ConcurrentHashMap.newKeySet();
 
-    public static class VisualEvaluation {
-        public final String status;      // "signal_detected", "no_signal_detected", "unknown"
-        public final String reason;      // descriptive reason
-        public final double ratio;       // ratio of yellow pixels (0.0 to 1.0)
-        public final int samples;        // count of evaluated samples (e.g. 64)
-        public final boolean stable;     // true if confirmed across observations
+    private String activeQueryId;
 
-        public VisualEvaluation(String status, String reason, double ratio, int samples, boolean stable) {
-            this.status = status;
-            this.reason = reason;
-            this.ratio = ratio;
-            this.samples = samples;
-            this.stable = stable;
-        }
-
-        public boolean isYellow() {
-            return "signal_detected".equals(status) && stable && ratio > 0;
-        }
-
-        public boolean isWhite() {
-            return "no_signal_detected".equals(status) && stable && ratio == 0;
-        }
-    }
-
-    RasterVisualDetector() {}
-
-    public static synchronized void init(Context context) {
-        if (tileDiskDir == null && context != null) {
-            // Use permanent private filesDir so Android never auto-deletes stored tiles on low cache
-            tileDiskDir = new File(context.getFilesDir(), "tiles_storage");
-            if (!tileDiskDir.exists()) {
-                tileDiskDir.mkdirs();
+    public static synchronized void init(Context ctx) {
+        if (ctx != null) appContext = ctx.getApplicationContext();
+        Context target = appContext != null ? appContext : ctx;
+        if (storage == null) {
+            networkMonitor = NetworkQualityMonitor.getInstance();
+            if (target != null) {
+                storage = new TileStorage(target);
+                networkMonitor.registerConnectivity(target);
+                coordinator = new TileRequestCoordinator(storage, networkMonitor);
+                File zonesFile = new File(target.getFilesDir(), "work_zones.json");
+                RasterTileProfile defaultProfile = ProviderRegistry.DEFAULT.resolve(
+                        java.net.URI.create("https://cobertura.megacable.com.mx")).tileProfile();
+                zoneManager = new ZoneManager(zonesFile, storage, coordinator, networkMonitor, defaultProfile);
+            } else {
+                File fallbackDir = new File(System.getProperty("java.io.tmpdir", "."), "geopin_tiles");
+                storage = new TileStorage(fallbackDir);
+                coordinator = new TileRequestCoordinator(storage, networkMonitor);
             }
-            PREFETCH_EXECUTOR.execute(RasterVisualDetector::trimDiskCacheIfNeeded);
         }
     }
 
-    public void startQuery(String queryId) {
-        activeQueryId = queryId != null ? queryId : "";
+    public static TileStorage getStorage() {
+        if (storage == null) init(appContext);
+        return storage;
     }
 
-    private static final java.util.regex.Pattern P_X = java.util.regex.Pattern.compile("[?&/]x=(\\d+)");
-    private static final java.util.regex.Pattern P_Y = java.util.regex.Pattern.compile("[?&/]y=(\\d+)");
-    private static final java.util.regex.Pattern P_Z = java.util.regex.Pattern.compile("[?&/]z=(\\d+)");
+    public static ZoneManager getZoneManager() {
+        if (zoneManager == null) init(appContext);
+        return zoneManager;
+    }
+
+    public static NetworkQualityMonitor getNetworkMonitor() {
+        if (networkMonitor == null) init(appContext);
+        return networkMonitor;
+    }
+
+    public static void setAppContext(Context ctx) {
+        appContext = ctx.getApplicationContext();
+        init(appContext);
+    }
+
+    public void startQuery(String id) {
+        this.activeQueryId = id;
+        if (coordinator != null) {
+            coordinator.bumpSearchGeneration(coordinator.getActiveSearchGeneration() + 1);
+        }
+    }
 
     /**
-     * Intercepts both provider coverage and Google Maps base tiles.
-     * Delivers from RAM or permanent flash storage in 0ms (zero data consumed).
-     * On first visit, fetches via HTTP/2 connection pool, saves permanently to disk, and serves.
+     * Intercepts WebView tile requests and dispatches via fast non-blocking pipeline.
      */
     public static WebResourceResponse shouldIntercept(Uri uri, RasterTileProfile profile) {
-        if (uri == null) return null;
+        if (uri == null || profile == null) return null;
         String urlStr = uri.toString();
 
         boolean isFibra = profile.primary(urlStr);
@@ -118,216 +102,224 @@ public final class RasterVisualDetector {
 
         if (!isFibra && !isHfc && !isGoogle && !isInegi) return null;
 
-        String key = null;
-        if (isFibra || isHfc) {
+        TileSpec spec = parseTileSpec(uri, urlStr, isFibra, isHfc, isGoogle, isInegi, profile);
+        if (spec == null) return null;
+
+        if (storage == null) {
+            init(appContext);
+        }
+
+        // 1. Instant RAM/Flash cache hit (0 ms, 0 network bytes)
+        TileStorage.StoredTile cached = storage != null ? storage.get(spec) : null;
+        if (cached != null) {
+            return buildWebResponse(cached.data, cached.etag, cached.lastModified, cached.isFallback);
+        }
+
+        // 2. Empty Tile Cache: if previously confirmed transparent empty (coverage ONLY)
+        String tileCoordKey = spec.layerId + "_" + spec.z + "_" + spec.x + "_" + spec.y;
+        if ((isFibra || isHfc) && EMPTY_TILES_REGISTRY.contains(tileCoordKey)) {
+            return buildEmptyTransparentResponse();
+        }
+
+        // 3. Offline mode: serve fallback from parent if available
+        if (networkMonitor != null && !networkMonitor.isOnline()) {
+            TileStorage.StoredTile fallback = storage != null ? storage.getVisualFallback(spec) : null;
+            if (fallback != null) {
+                return buildWebResponse(fallback.data, null, null, true);
+            }
+            return null;
+        }
+
+        // 4. Parallel HTTP/2 fetch with ETag / 304 conditional revalidation
+        try {
+            okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
+                    .url(urlStr)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
+
+            if (cached != null && cached.etag != null) {
+                rb.header("If-None-Match", cached.etag);
+            }
+            if (cached != null && cached.lastModified != null) {
+                rb.header("If-Modified-Since", cached.lastModified);
+            }
+
+            try (okhttp3.Response resp = FAST_CLIENT.newCall(rb.build()).execute()) {
+                if (resp.code() == 304 && cached != null) {
+                    if (storage != null) {
+                        storage.markValidated(spec, resp.header("ETag"), resp.header("Last-Modified"));
+                    }
+                    return buildWebResponse(cached.data, cached.etag, cached.lastModified, false);
+                }
+
+                if (resp.isSuccessful() && resp.body() != null) {
+                    byte[] data = resp.body().bytes();
+                    if (data != null && data.length > 0) {
+                        if ((isFibra || isHfc) && data.length < 350) {
+                            EMPTY_TILES_REGISTRY.add(tileCoordKey);
+                        }
+
+                        if (storage != null) {
+                            storage.put(spec, data, resp.header("ETag"), resp.header("Last-Modified"));
+                        }
+                        if (networkMonitor != null) {
+                            networkMonitor.recordSample(data.length, 100, resp.code());
+                        }
+                        return buildWebResponse(data, resp.header("ETag"), resp.header("Last-Modified"), false);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // 5. If download timed out or failed, attempt visual fallback from parent
+        if (storage != null) {
+            TileStorage.StoredTile fallback = storage.getVisualFallback(spec);
+            if (fallback != null) {
+                return buildWebResponse(fallback.data, null, null, true);
+            }
+        }
+
+        return null;
+    }
+
+    private static final byte[] EMPTY_PNG = new byte[]{
+            (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, (byte) 0xc4,
+            (byte) 0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41,
+            0x54, 0x78, (byte) 0x9c, 0x63, 0x60, 0x00, 0x02, 0x00,
+            0x00, 0x05, 0x00, 0x01, (byte) 0xe9, 0x34, 0x2e, (byte) 0xea,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+            (byte) 0xae, 0x42, 0x60, (byte) 0x82
+    };
+
+    private static WebResourceResponse buildEmptyTransparentResponse() {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "image/png");
+        headers.put("Cache-Control", "public, max-age=604800");
+        return new WebResourceResponse("image/png", null, 200, "OK", headers, new ByteArrayInputStream(EMPTY_PNG));
+    }
+
+    private static TileSpec parseTileSpec(Uri uri, String urlStr, boolean isFibra, boolean isHfc,
+                                          boolean isGoogle, boolean isInegi, RasterTileProfile profile) {
+        int z = 17, x = -1, y = -1;
+        String layer = isFibra ? "fibra" : (isHfc ? "hfc" : (isGoogle ? "base" : "inegi"));
+        boolean isCoverage = isFibra || isHfc;
+        boolean isBase = isGoogle || isInegi;
+
+        if (isCoverage || isInegi) {
             String colStr = uri.getQueryParameter("TileCol");
             if (colStr == null) colStr = uri.getQueryParameter("tilecol");
             String rowStr = uri.getQueryParameter("TileRow");
             if (rowStr == null) rowStr = uri.getQueryParameter("tilerow");
-            String matrix = uri.getQueryParameter("TileMatrix");
-            if (matrix == null) matrix = uri.getQueryParameter("tilematrix");
+            String tileMatrixStr = uri.getQueryParameter("TileMatrix");
+            if (tileMatrixStr == null) tileMatrixStr = uri.getQueryParameter("tilematrix");
 
-            String zStr = "17";
-            if (matrix != null) {
-                int colon = matrix.lastIndexOf(':');
-                zStr = colon >= 0 ? matrix.substring(colon + 1) : matrix;
-            }
-
-            if (colStr == null || rowStr == null) return null;
-            String prefix = isFibra ? "fibra_" : "hfc_";
-            key = prefix + zStr + "_" + colStr + "_" + rowStr;
-        } else if (isGoogle) {
-            String x = uri.getQueryParameter("x");
-            String y = uri.getQueryParameter("y");
-            String z = uri.getQueryParameter("z");
-            if (x == null || y == null || z == null) {
-                java.util.regex.Matcher mx = P_X.matcher(urlStr);
-                if (mx.find()) x = mx.group(1);
-                java.util.regex.Matcher my = P_Y.matcher(urlStr);
-                if (my.find()) y = my.group(1);
-                java.util.regex.Matcher mz = P_Z.matcher(urlStr);
-                if (mz.find()) z = mz.group(1);
-            }
-            if (x == null || y == null || z == null) return null;
-            key = "google_" + z + "_" + x + "_" + y;
-        } else if (isInegi) {
-            key = "inegi_" + Integer.toHexString(urlStr.hashCode());
-        }
-
-        if (key == null) return null;
-
-        key = profile.cacheNamespace() + key;
-
-        // 1. Check in-memory RAM cache (instant sub-millisecond)
-        byte[] cached = TILE_CACHE.get(key);
-
-        // 2. Check permanent flash storage
-        if (cached == null && tileDiskDir != null) {
-            File diskFile = new File(tileDiskDir, key + ".png");
-            if (diskFile.exists() && diskFile.length() > 0) {
-                cached = readFileBytes(diskFile);
-                if (cached != null && cached.length > 0) {
-                    if (TILE_CACHE.size() < 2048) {
-                        TILE_CACHE.put(key, cached);
+            if (colStr != null && rowStr != null) {
+                try {
+                    x = Integer.parseInt(colStr);
+                    y = Integer.parseInt(rowStr);
+                    if (tileMatrixStr != null) {
+                        String cleanZ = tileMatrixStr.replaceAll("[^0-9]", "");
+                        if (!cleanZ.isEmpty()) z = Integer.parseInt(cleanZ);
                     }
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+
+        if (x < 0 || y < 0) {
+            String path = uri.getPath();
+            if (path != null) {
+                String[] segments = path.split("/");
+                for (int i = 0; i < segments.length - 2; i++) {
+                    try {
+                        int pz = Integer.parseInt(segments[i]);
+                        int px = Integer.parseInt(segments[i + 1]);
+                        String last = segments[i + 2].replaceAll("\\.[a-zA-Z]+$", "");
+                        int py = Integer.parseInt(last);
+                        if (pz >= 0 && pz <= 22) {
+                            z = pz; x = px; y = py;
+                            break;
+                        }
+                    } catch (NumberFormatException ignored) {}
                 }
             }
         }
 
-        // 3. If in cache, return immediately (0 ms response, 0 mobile data consumed).
-        if (cached != null) {
-            Map<String, String> headers = new HashMap<>();
-            headers.put("Access-Control-Allow-Origin", "*");
-            headers.put("Access-Control-Allow-Methods", "GET, OPTIONS");
-            headers.put("Content-Type", "image/png");
-            headers.put("Cache-Control", "public, max-age=31536000, immutable");
-            return new WebResourceResponse("image/png", null, 200, "OK", headers, new ByteArrayInputStream(cached));
-        }
-
-        // 4. On first load of an unvisited tile: fetch with fast HTTP/2 pipeline, save permanently, and serve!
-        byte[] data = downloadTile(urlStr);
-        if (data != null && data.length > 0) {
-            if (TILE_CACHE.size() < 2048) {
-                TILE_CACHE.put(key, data);
+        if (x < 0 || y < 0) {
+            String query = uri.getQuery();
+            if (query != null) {
+                try {
+                    String qx = uri.getQueryParameter("x");
+                    String qy = uri.getQueryParameter("y");
+                    String qz = uri.getQueryParameter("z");
+                    if (qx != null && qy != null) {
+                        x = Integer.parseInt(qx);
+                        y = Integer.parseInt(qy);
+                        if (qz != null) z = Integer.parseInt(qz);
+                    }
+                } catch (NumberFormatException ignored) {}
             }
-            saveTileToDisk(key, data);
-            Map<String, String> headers = new HashMap<>();
-            headers.put("Access-Control-Allow-Origin", "*");
-            headers.put("Access-Control-Allow-Methods", "GET, OPTIONS");
-            headers.put("Content-Type", "image/png");
-            headers.put("Cache-Control", "public, max-age=31536000, immutable");
-            return new WebResourceResponse("image/png", null, 200, "OK", headers, new ByteArrayInputStream(data));
         }
 
-        return null;
+        if (x < 0 || y < 0) return null;
+
+        long ttl = isCoverage ? 7L * 24 * 3600 * 1000 : 30L * 24 * 3600 * 1000;
+        return new TileSpec("coverage-v1", layer, "v1", "EPSG:900913", 256, z, x, y, urlStr, ttl, isCoverage, isBase);
     }
 
-    /**
-     * Prefetches surrounding tiles in background (both fiber and Google base map)
-     * to ensure instant zero-latency panning without white panels.
-     */
+    private static WebResourceResponse buildWebResponse(byte[] data, String etag, String lastModified, boolean isFallback) {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "image/png");
+        headers.put("Access-Control-Allow-Origin", "*");
+        if (etag != null) headers.put("ETag", etag);
+        if (lastModified != null) headers.put("Last-Modified", lastModified);
+        if (isFallback) headers.put("X-Tile-Fallback", "scaled_parent");
+        headers.put("Cache-Control", "public, max-age=" + (isFallback ? "60" : "604800"));
+
+        return new WebResourceResponse("image/png", null, 200, "OK", headers, new ByteArrayInputStream(data));
+    }
+
     public static void prefetchNeighbors(double lat, double lon, RasterTileProfile profile) {
-        PREFETCH_EXECUTOR.execute(() -> {
-            final double n17 = 131072.0; // 2^17
-            double x17 = (lon + 180.0) / 360.0 * n17;
-            double latRad = Math.toRadians(lat);
-            double y17 = (1.0 - Math.log(Math.tan(Math.PI / 4.0 + latRad / 2.0)) / Math.PI) / 2.0 * n17;
+        if (profile == null) return;
+        if (storage == null) init(appContext);
 
-            int centerCol17 = (int) Math.floor(x17);
-            int centerRow17 = (int) Math.floor(y17);
+        final double n17 = 131072.0;
+        double x17 = (lon + 180.0) / 360.0 * n17;
+        double latRad = Math.toRadians(lat);
+        double y17 = (1.0 - Math.log(Math.tan(Math.PI / 4.0 + latRad / 2.0)) / Math.PI) / 2.0 * n17;
 
-            // Zoom 17 ring (5x5 grid)
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dx = -2; dx <= 2; dx++) {
-                    int col = centerCol17 + dx;
-                    int row = centerRow17 + dy;
+        int centerCol17 = (int) Math.floor(x17);
+        int centerRow17 = (int) Math.floor(y17);
 
-                    // Prefetch Fiber tile
-                    prefetchSingle(profile.cacheNamespace() + "fibra_17_" + col + "_" + row,
-                            profile.overlay(17, col, row));
+        // Pre-fetch 3x3 ring at Priority 1 (PREFETCH)
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int col = centerCol17 + dx;
+                int row = centerRow17 + dy;
 
-                    // Prefetch Google Base tile
-                    prefetchSingle(profile.cacheNamespace() + "google_17_" + col + "_" + row,
-                            profile.baseTile(17, col, row));
-                }
-            }
+                TileSpec fiberSpec = new TileSpec("coverage-v1", "fibra", "v1", "EPSG:900913", 256,
+                        17, col, row, profile.overlay(17, col, row), 7L * 24 * 3600 * 1000, true, false);
 
-            // Zoom 16 ring (3x3 grid) for smooth zoom-out
-            int centerCol16 = centerCol17 / 2;
-            int centerRow16 = centerRow17 / 2;
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    int col = centerCol16 + dx;
-                    int row = centerRow16 + dy;
-
-                    prefetchSingle(profile.cacheNamespace() + "fibra_16_" + col + "_" + row,
-                            profile.overlay(16, col, row));
-
-                    prefetchSingle(profile.cacheNamespace() + "google_16_" + col + "_" + row,
-                            profile.baseTile(16, col, row));
-                }
-            }
-        });
-    }
-
-    private static void prefetchSingle(String key, String url) {
-        if (TILE_CACHE.containsKey(key)) return;
-        if (tileDiskDir != null && new File(tileDiskDir, key + ".png").exists()) return;
-
-        byte[] data = downloadTile(url);
-        if (data != null && data.length > 0) {
-            if (TILE_CACHE.size() < 2048) {
-                TILE_CACHE.put(key, data);
-            }
-            saveTileToDisk(key, data);
-        }
-    }
-
-    private static byte[] downloadTile(String urlStr) {
-        Request req = new Request.Builder()
-                .url(urlStr)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
-                .build();
-        try (Response resp = HTTP_CLIENT.newCall(req).execute()) {
-            if (resp.isSuccessful() && resp.body() != null) {
-                return resp.body().bytes();
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    private static void saveTileToDisk(String key, byte[] bytes) {
-        if (tileDiskDir == null || bytes == null || bytes.length == 0) return;
-        try {
-            File f = new File(tileDiskDir, key + ".png");
-            try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write(bytes);
-            }
-        } catch (Exception ignored) {}
-    }
-
-    private static byte[] readFileBytes(File file) {
-        try (FileInputStream fis = new FileInputStream(file);
-             ByteArrayOutputStream baos = new ByteArrayOutputStream((int) file.length())) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = fis.read(buf)) != -1) {
-                baos.write(buf, 0, n);
-            }
-            return baos.toByteArray();
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static void trimDiskCacheIfNeeded() {
-        if (tileDiskDir == null || !tileDiskDir.exists()) return;
-        File[] files = tileDiskDir.listFiles();
-        if (files == null || files.length < 3000) return;
-
-        long totalBytes = 0;
-        for (File f : files) totalBytes += f.length();
-
-        // 300 MB permanent local storage for tens of thousands of tiles
-        if (totalBytes > 300L * 1024L * 1024L) {
-            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
-            int pruneCount = files.length / 5; // Prune oldest 20%
-            for (int i = 0; i < pruneCount; i++) {
-                files[i].delete();
+                coordinator.requestTile(fiberSpec, TileRequestCoordinator.PRIORITY_PREFETCH,
+                        "prefetch_neighbor", coordinator.getActiveSearchGeneration(), null);
             }
         }
     }
 
-    /**
-     * Evaluates fiber presence in the isolated native tile at the exact queried coordinates.
-     */
     public VisualEvaluation evaluate(double lat, double lon, String queryId, RasterTileProfile profile) {
         if (queryId == null || !queryId.equals(activeQueryId)) {
             return new VisualEvaluation("unknown", "query_mismatch", 0.0, 0, false);
         }
 
-        // Web Mercator EPSG:900913 at native zoom z=17
+        // Automatic Work Zone determination:
+        // Automatically creates a bounded persistent work zone (~30km pyramid)
+        // and synchronizes missing pyramid tiles in the background with Wi-Fi.
+        if (zoneManager != null) {
+            zoneManager.recordUsage(lat, lon, 17);
+        }
+
         final double n = 131072.0; // 2^17
         double x = (lon + 180.0) / 360.0 * n;
         double latRad = Math.toRadians(lat);
@@ -335,114 +327,83 @@ public final class RasterVisualDetector {
 
         int tileCol = (int) Math.floor(x);
         int tileRow = (int) Math.floor(y);
-        int px = (int) Math.floor((x - tileCol) * 256.0);
-        int py = (int) Math.floor((y - tileRow) * 256.0);
 
-        String key = profile.cacheNamespace() + "fibra_17_" + tileCol + "_" + tileRow;
-        byte[] tileBytes = TILE_CACHE.get(key);
-
-        if (tileBytes == null && tileDiskDir != null) {
-            File f = new File(tileDiskDir, key + ".png");
-            if (f.exists()) {
-                tileBytes = readFileBytes(f);
-                if (tileBytes != null) TILE_CACHE.put(key, tileBytes);
-            }
+        TileSpec spec = new TileSpec("coverage-v1", "fibra", "v1", "EPSG:900913", 256,
+                17, tileCol, tileRow, profile.overlay(17, tileCol, tileRow), 7L * 24 * 3600 * 1000, true, false);
+        if (storage != null) {
+            storage.pinPoint(17, tileCol, tileRow);
         }
 
-        if (tileBytes == null) {
-            // Wait up to 1.5s for tile to arrive from in-flight request
-            long deadline = System.currentTimeMillis() + 1500;
-            while (tileBytes == null && System.currentTimeMillis() < deadline) {
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException ignored) {
-                    break;
-                }
-                tileBytes = TILE_CACHE.get(key);
-                if (tileBytes == null && tileDiskDir != null) {
-                    File f = new File(tileDiskDir, key + ".png");
-                    if (f.exists()) {
-                        tileBytes = readFileBytes(f);
-                        if (tileBytes != null) TILE_CACHE.put(key, tileBytes);
-                    }
-                }
-            }
+        if (coordinator == null) {
+            init(null);
         }
 
-        if (tileBytes == null) {
-            return new VisualEvaluation("unknown", "tile_missing_from_cache", 0.0, 0, false);
-        }
+        // Fetch synchronously with top Priority 4 (SELECTED_POINT)
+        byte[] tileBytes = coordinator.getOrFetchSync(spec, 3500);
 
-        Bitmap bitmap = BitmapFactory.decodeByteArray(tileBytes, 0, tileBytes.length);
-        if (bitmap == null || bitmap.getWidth() < 256 || bitmap.getHeight() < 256) {
-            return new VisualEvaluation("unknown", "decode_failed", 0.0, 0, false);
-        }
+        TileStorage.StoredTile stored = storage.get(spec);
+        boolean isSavedData = stored != null;
+        long tileTs = stored != null ? stored.timestamp : System.currentTimeMillis();
+        boolean isFallback = stored != null && stored.isFallback;
 
-        // Two-pass stability observation (sampling 8x8 = 64 pixels centered at px, py)
-        VisualEvaluation firstPass = sampleGrid(bitmap, px, py);
-
-        try {
-            Thread.sleep(60);
-        } catch (InterruptedException ignored) {}
-
-        VisualEvaluation secondPass = sampleGrid(bitmap, px, py);
-
-        boolean stable = firstPass.status.equals(secondPass.status)
-                && Math.abs(firstPass.ratio - secondPass.ratio) < 0.05;
+        CoverageEvaluator.EvaluationResult res = CoverageEvaluator.evaluate(
+                tileBytes, lat, lon, 17, tileCol, tileRow, isSavedData, tileTs, isFallback);
 
         return new VisualEvaluation(
-                firstPass.status,
-                firstPass.reason,
-                firstPass.ratio,
-                SAMPLE_COUNT,
-                stable
+                res.status,
+                res.reason,
+                res.ratio,
+                res.samples,
+                res.stable,
+                res.isSavedData,
+                res.tileTimestamp,
+                res.ageDays,
+                res.isFallback
         );
     }
 
-    private static VisualEvaluation sampleGrid(Bitmap bitmap, int cx, int cy) {
-        int yellowCount = 0;
-        int opaqueCount = 0;
-        int validSamples = 0;
+    public static final class VisualEvaluation {
+        public final String status;
+        public final String reason;
+        public final double ratio;
+        public final int samples;
+        public final boolean stable;
+        public final boolean isSavedData;
+        public final long tileTimestamp;
+        public final int ageDays;
+        public final boolean isFallback;
 
-        // Sample 8x8 grid centered at (cx, cy)
-        for (int dy = -3; dy <= 4; dy++) {
-            for (int dx = -3; dx <= 4; dx++) {
-                int sx = cx + dx;
-                int sy = cy + dy;
-
-                // Handle tile borders: clamp within [0, 255]
-                if (sx < 0) sx = 0;
-                else if (sx > 255) sx = 255;
-                if (sy < 0) sy = 0;
-                else if (sy > 255) sy = 255;
-
-                validSamples++;
-                int pixel = bitmap.getPixel(sx, sy);
-                int a = Color.alpha(pixel);
-                int r = Color.red(pixel);
-                int g = Color.green(pixel);
-                int b = Color.blue(pixel);
-
-                if (a >= 32) {
-                    opaqueCount++;
-                    // Calibrated provider fiber coverage RGBA: (252, 164, 0, 90)
-                    if (r >= 170 && g >= 120 && b <= 70 && (r - g < 110) && (g - b >= 40)) {
-                        yellowCount++;
-                    }
-                }
-            }
+        public VisualEvaluation(String status, String reason, double ratio, int samples, boolean stable) {
+            this(status, reason, ratio, samples, stable, false, System.currentTimeMillis(), 0, false);
         }
 
-        double ratio = validSamples > 0 ? (double) yellowCount / validSamples : 0.0;
-
-        if (yellowCount >= 8) { // At least 12.5% of sample area has confirmed fiber color
-            return new VisualEvaluation("signal_detected", "yellow_at_selected_point", ratio, validSamples, true);
+        public VisualEvaluation(String status, String reason, double ratio, int samples, boolean stable,
+                                boolean isSavedData, long tileTimestamp, int ageDays, boolean isFallback) {
+            this.status = status;
+            this.reason = reason;
+            this.ratio = ratio;
+            this.samples = samples;
+            this.stable = stable;
+            this.isSavedData = isSavedData;
+            this.tileTimestamp = tileTimestamp;
+            this.ageDays = ageDays;
+            this.isFallback = isFallback;
         }
 
-        if (opaqueCount == 0) { // All 64 sample pixels are 100% transparent in fiber layer
-            return new VisualEvaluation("no_signal_detected", "transparent_tile_at_selected_point", 0.0, validSamples, true);
+        public boolean isYellow() {
+            return "signal_detected".equals(status) && stable && ratio > 0 && !isFallback;
         }
 
-        return new VisualEvaluation("unknown", "inconclusive_pixels", ratio, validSamples, false);
+        public boolean isWhite() {
+            return "no_signal_detected".equals(status) && stable && ratio == 0 && !isFallback;
+        }
+
+        public boolean isDataMissing() {
+            return isFallback || "data_missing_or_pending".equals(status);
+        }
+
+        public boolean isUnknown() {
+            return !isYellow() && !isWhite() && !isDataMissing();
+        }
     }
 }

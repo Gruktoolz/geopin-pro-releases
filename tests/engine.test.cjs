@@ -21,7 +21,7 @@ function exercise(directory,legacy=false,origin='https://map.example'){
  assert.equal(window.__coverageAdapter.query(20.5,-103.2,7),'requested');
  assert.equal(window.__coverageAdapter.center(),true);
  assert.equal(window.__virtualLocation.point().lat,20.5);
- assert.equal(m.getMinZoom(),5);assert.equal(layer.options.keepBuffer,24);assert.equal(layer.options.updateInterval,16);assert.equal(layer.options.updateWhenIdle,false);
+ assert.equal(m.getMinZoom(),5);assert.equal(layer.options.keepBuffer,24);assert.equal(layer.options.updateInterval,5);assert.equal(layer.options.updateWhenIdle,false);
  assert.deepEqual(timers.map(t=>t.delay),[150,400,800,1500,3000]);
  listeners['geo-blur']();listeners.resize();assert.deepEqual(timers.slice(-2).map(t=>t.delay),[250,250]);
  const options=JSON.parse(JSON.stringify(layer.options));

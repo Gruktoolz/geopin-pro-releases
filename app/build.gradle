@@ -20,8 +20,8 @@ android {
         minSdk 29
         targetSdk 36
         testInstrumentationRunner 'mx.coberturapunto.EngineInstrumentation'
-        versionCode 32
-        versionName '1.0.7'
+        versionCode 33
+        versionName '1.0.8'
     }
     signingConfigs {
         release {

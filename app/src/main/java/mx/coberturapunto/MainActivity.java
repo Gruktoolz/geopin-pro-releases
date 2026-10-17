@@ -15,6 +15,7 @@ import android.webkit.*;
 import android.widget.*;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import java.io.ByteArrayInputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -183,6 +184,13 @@ public class MainActivity extends Activity {
             if(!mainFrame || !ORIGIN.equals(origin.toString())) return;
             try {
                 JSONObject value=new JSONObject(message.getData());
+                if(value.optString("type").equals("map-ready")){
+                    runOnUiThread(()->{
+                        ready=true;center.setEnabled(true);setBusy(false,"Mapa listo");
+                        if(autoQueryPending && pending!=null) query();
+                    });
+                    return;
+                }
                 if(value.optString("type").equals("location-result")){
                     finishLocation(value.optInt("id"),value.optBoolean("ok"),value);return;
                 }
@@ -203,7 +211,21 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient(){
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 if (request != null && request.getUrl() != null) {
-                    WebResourceResponse intercepted = mapEngine.intercept(request.getUrl());
+                    Uri uri = request.getUrl();
+                    TileStorage ts = RasterVisualDetector.getStorage();
+                    if (ts != null) {
+                        TileStorage.StoredWebAsset asset = ts.getWebAsset(uri.toString());
+                        if (asset != null) {
+                            NetworkQualityMonitor nqm = RasterVisualDetector.getNetworkMonitor();
+                            if (nqm != null && !nqm.isOnline()) {
+                                Map<String, String> h = new HashMap<>();
+                                h.put("Access-Control-Allow-Origin", "*");
+                                h.put("Content-Type", asset.mimeType);
+                                return new WebResourceResponse(asset.mimeType, "UTF-8", 200, "OK", h, new ByteArrayInputStream(asset.data));
+                            }
+                        }
+                    }
+                    WebResourceResponse intercepted = mapEngine.intercept(uri);
                     if (intercepted != null) return intercepted;
                 }
                 return super.shouldInterceptRequest(view, request);
@@ -232,8 +254,37 @@ public class MainActivity extends Activity {
             web.loadDataWithBaseURL(ORIGIN+"/", "<html><body>Prueba funcional del proveedor virtual<script>"+asset("virtual-location-selftest.js")+"</script></body></html>","text/html","UTF-8",null);
         } else {
             web.loadUrl(startUrl);
-            if(state==null)receive(getIntent());
-            else input.setText(state.getString("inputText",""));
+            if(state==null) {
+                LocationInput.Point last = LastContextStore.getLastLocation(this);
+                if (last != null) {
+                    select(last);
+                    autoQueryPending = true;
+                    currentCity = LastContextStore.getLastCity(this);
+                    if (!currentCity.isEmpty()) input.setText(currentCity);
+                }
+                receive(getIntent());
+            } else {
+                input.setText(state.getString("inputText",""));
+            }
+            worker.execute(() -> {
+                try {
+                    TileStorage ts = RasterVisualDetector.getStorage();
+                    if (ts != null && ts.getWebAsset(startUrl) == null) {
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(startUrl).openConnection();
+                        conn.setConnectTimeout(5000);
+                        conn.setReadTimeout(5000);
+                        if (conn.getResponseCode() == 200) {
+                            try (java.io.InputStream in = conn.getInputStream();
+                                 java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                                byte[] b = new byte[8192];
+                                int n;
+                                while ((n = in.read(b)) != -1) out.write(b, 0, n);
+                                ts.putWebAsset(startUrl, "text/html", out.toByteArray());
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            });
         }
     }
     private void configurePalette(){
@@ -306,6 +357,15 @@ public class MainActivity extends Activity {
                             center.setText("Sin fibra en el punto");
                             center.setContentDescription("Sin cobertura de fibra en el punto");
                             center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(5, onAccentColor, getResources().getDisplayMetrics().density), null, null, null);
+                        }
+                    });
+                } else if (eval.isDataMissing()) {
+                    AppTelemetry.locationIndeterminate(eval);
+                    runOnUiThread(() -> {
+                        if (!isDestroyed() && !locationLoading) {
+                            center.setText("Dato no disponible");
+                            center.setContentDescription("Dato de cobertura no disponible para este punto");
+                            center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(4, onAccentColor, getResources().getDisplayMetrics().density), null, null, null);
                         }
                     });
                 } else {
@@ -494,6 +554,7 @@ public class MainActivity extends Activity {
         currentSource=source!=null?source:"other";
         SearchMemory.Area area=searchMemory.area();
         if(currentCity.isEmpty() && area!=null && area.city!=null) currentCity=area.city;
+        LastContextStore.save(this, point.lat(), point.lon(), currentCity, 17);
         currentQueryId=java.util.UUID.randomUUID().toString();
         mapEngine.startQuery(currentQueryId);
         query();
@@ -618,4 +679,5 @@ public class MainActivity extends Activity {
     }
     @Override protected void onSaveInstanceState(Bundle out){if(input!=null)out.putString("inputText",input.getText().toString());out.putInt("normalOrientation",normalOrientation);if(pending!=null){out.putDouble("lat",pending.lat());out.putDouble("lon",pending.lon());out.putBoolean("autoQueryPending",autoQueryPending);}super.onSaveInstanceState(out);}
     @Override protected void onDestroy(){foreground=false;if(appUpdater!=null)appUpdater.close();dismissCaptureFeedback();cacheHandler.removeCallbacks(cacheMaintenance);lookupGeneration++;worker.shutdownNow();if(suggestions!=null)suggestions.close();cacheHandler.removeCallbacks(locationTimeout);if(feedbackSounds!=null)feedbackSounds.close();if(web!=null)web.destroy();super.onDestroy();}
+
 }

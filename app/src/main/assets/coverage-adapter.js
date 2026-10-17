@@ -60,6 +60,16 @@
       notify({type:'point',source:'center',lat:p.lat,lon:p.lng});
       return true;
     },
+    bounds() {
+      if (!attach() || !boundMap) return null;
+      const b = boundMap.getBounds();
+      return JSON.stringify({
+        minLat: b.getSouth(),
+        minLon: b.getWest(),
+        maxLat: b.getNorth(),
+        maxLon: b.getEast()
+      });
+    },
     query(lat, lon, id=0) {
       if (!window.__virtualLocation || !attach()) return 'not-ready';
       const button = document.querySelector(window.__mapProvider.locateControl);
