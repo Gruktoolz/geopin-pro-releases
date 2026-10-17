@@ -1,0 +1,32 @@
+name: Import verified Antigravity history
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: geopin-source-import
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify and merge preserved histories
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Gruktoolz/geopin-pro-releases"
+          echo 'bf1da2ef4160a0f9530c469f7b8878485e235e46c00ba06e5c2aa43df67aee2a  GeoPin-Pro-historiales.bundle' | sha256sum --check
+          git bundle verify GeoPin-Pro-historiales.bundle
+          git fetch ./GeoPin-Pro-historiales.bundle refs/heads/main:refs/remotes/antigravity/main
+          test "$(git rev-parse refs/remotes/antigravity/main)" = '4ab20efa6444350cc04d65a73d2c66c46f0066f8'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-ff -m 'Integrate preserved Antigravity source for GeoPin Pro 1.0.9 (34)' refs/remotes/antigravity/main
+          git merge-base --is-ancestor 9fa772fe43b1b7f7f06fe2a13a94ef54e388334c HEAD
+          git merge-base --is-ancestor 7e34cd9 HEAD
+          test -f app/src/main/java/mx/coberturapunto/TileStorage.java
+          git push origin HEAD:main
