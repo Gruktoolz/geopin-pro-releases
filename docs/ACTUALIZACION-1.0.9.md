@@ -1,8 +1,8 @@
 # GeoPin Pro 1.0.9 (34): comparación y verificación
 
-Fecha: 17 de octubre de 2026. Publicación **bloqueada por autenticación de GitHub**.
+Fecha: 17 de octubre de 2026. Publicación **completada y verificada**: [release v1.0.9](https://github.com/Gruktoolz/geopin-pro-releases/releases/tag/v1.0.9).
 
-## Versiones y origen
+## Versiones y origen antes de la actualización
 
 - Repositorio confirmado: https://github.com/Gruktoolz/geopin-pro-releases.
 - Remoto `main`: `9fa772f`, manifiestos de 1.0.7/código 32.
@@ -13,7 +13,7 @@ Fecha: 17 de octubre de 2026. Publicación **bloqueada por autenticación de Git
 
 ## Historiales conservados
 
-Antigravity trabajó sobre `cea43a8`, sin remoto configurado, con 6 archivos modificados y 10 archivos nuevos sin seguimiento (9 clases Java y una suite). El repositorio remoto contiene README, workflow y dos manifiestos; no contiene el código Android. No existe ancestro común ni es posible atribuir diferencias Java línea a línea a una rama remota sin fuentes.
+Antigravity trabajó sobre `cea43a8`, sin remoto configurado, con 6 archivos modificados y 10 archivos nuevos sin seguimiento (9 clases Java y una suite). Antes de la actualización, el repositorio remoto contenía README, workflow y dos manifiestos; no contenía el código Android. No existe ancestro común ni es posible atribuir diferencias Java línea a línea a una rama remota sin fuentes.
 
 - `fd54727`: conserva exactamente los cambios de Antigravity antes de corregirlos.
 - `083fcd3`: integra ambos historiales sin reescritura. Conserva el README remoto y el README local como `docs/ENGINE-README.md`.
@@ -59,6 +59,14 @@ El primer intento de compilación con el Java 25 de Android Studio falló por in
 
 No se probó el uso prolongado con el proveedor real ni el apagado y reapertura completos de la app con todos sus recursos web sin conexión. El almacenamiento de HTML no garantiza disponer de todos los JS/CSS de terceros. La conservación de metadatos 304 está probada; no se ejecutó una respuesta HTTP 304 real del proveedor. No se midieron FPS, bytes reales por zona, actualización de todas las zonas tras reconexión, TTL completo ni rendimiento en un teléfono físico. No se afirma funcionamiento offline completo ni ausencia absoluta de huecos visuales.
 
-`git push origin main` falló por falta de credenciales HTTPS; el agente SSH tampoco tiene identidades. Los commits siguen siendo locales. No existe nueva release, enlace público al commit, tag publicado ni APK público 1.0.9. Los manifiestos públicos y los de la raíz del repositorio siguen en 1.0.7.
+## Publicación completada
 
-La carpeta de entrega contiene `updates.json` y `version.json` preparados con SHA, tamaño y URLs previstas para 1.0.9; no deben publicarse antes de que el APK esté disponible. Conservan las rutas canónica y de migración del workflow existente, con mínimo soportado 34. Cuando se habilite la autenticación, deberá comprobarse de nuevo el remoto, subir el historial sin force, publicar la release desde el commit de código con el APK firmado, descargar y verificar el asset, y comprobar la actualización de ambos manifiestos por el workflow existente. No se considera completada la publicación.
+La autenticación por navegador permitió publicar el paquete Git y un importador con SHA-256 y commit fijados. [La importación en Actions terminó correctamente](https://github.com/Gruktoolz/geopin-pro-releases/actions/runs/39049882279). El commit de integración `53d026349b8ed268f7da0b630c3f5918c5fb2b13` contiene ambos historiales y exactamente el mismo código de app, pruebas y configuración que el commit compilado `7e34cd9`. No hubo reescritura ni force push.
+
+- [Commit de código](https://github.com/Gruktoolz/geopin-pro-releases/commit/7e34cd9bb73fc9bbc74d930b32e4d6735c8acf01).
+- [Release estable v1.0.9](https://github.com/Gruktoolz/geopin-pro-releases/releases/tag/v1.0.9), vinculada al commit de integración.
+- [APK firmado](https://github.com/Gruktoolz/geopin-pro-releases/releases/download/v1.0.9/GeoPin-Pro-1.0.9.apk).
+- Se descargó el asset público: su SHA-256, tamaño, certificado, paquete y versión coinciden con el APK local verificado.
+- El workflow existente actualizó `updates.json` y `version.json`: ambos anuncian 1.0.9/34, mínimo soportado 34, con SHA y tamaño correctos. Se conservaron las rutas canónica y de migración.
+
+Los intentos iniciales de Git por terminal y del disparador manual no completaron la publicación. La vía de navegador más importación verificada sí la completó; los límites de pruebas descritos arriba permanecen.
