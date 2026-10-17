@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Clean open pin. Android supplies the launcher mask and shadow. -->
+    <path android:fillColor="#00000000" android:strokeColor="#242937"
+        android:strokeWidth="4.8" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M73,43 C70.8,32.2 61.1,25.7 50.5,27.7 C38.5,29.9 31.5,41.5 34.9,53.1 C36.8,59.8 46.7,72.3 52.5,80.2 Q54,82.2 55.5,80.2 C62.2,71.2 74.3,56.9 74.5,49.4" />
+    <path android:fillColor="#4285F4"
+        android:pathData="M54,40 A6.8,6.8 0,1 1,54,53.6 A6.8,6.8 0,1 1,54,40 Z" />
+</vector>

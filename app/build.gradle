@@ -1,0 +1,62 @@
+plugins { id 'com.android.application' }
+
+def releaseProperties = new Properties()
+def releasePropertiesFile = rootProject.file('keystore.properties')
+if (releasePropertiesFile.exists()) {
+    releasePropertiesFile.withInputStream { releaseProperties.load(it) }
+}
+def releaseSetting = { name, environment -> System.getenv(environment) ?: releaseProperties.getProperty(name) }
+def releaseStore = releaseSetting('storeFile', 'GEOPIN_STORE_FILE')
+def releaseStorePassword = releaseSetting('storePassword', 'GEOPIN_STORE_PASSWORD')
+def releaseAlias = releaseSetting('keyAlias', 'GEOPIN_KEY_ALIAS')
+def releaseKeyPassword = releaseSetting('keyPassword', 'GEOPIN_KEY_PASSWORD')
+def releaseSigningReady = [releaseStore, releaseStorePassword, releaseAlias, releaseKeyPassword].every { it != null && !it.isBlank() }
+
+android {
+    namespace 'mx.coberturapunto'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'mx.coberturapunto'
+        minSdk 29
+        targetSdk 36
+        testInstrumentationRunner 'mx.coberturapunto.EngineInstrumentation'
+        versionCode 34
+        versionName '1.0.9'
+    }
+    signingConfigs {
+        release {
+            if (releaseSigningReady) {
+                storeFile rootProject.file(releaseStore)
+                storePassword releaseStorePassword
+                keyAlias releaseAlias
+                keyPassword releaseKeyPassword
+            }
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+    buildTypes {
+        debug { /* Uses the separate Android debug identity. */ }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
+
+tasks.configureEach {
+    if (name == 'preReleaseBuild') {
+        doFirst {
+            if (!releaseSigningReady) {
+                throw new GradleException('Release signing requires private environment variables or ignored keystore.properties.')
+            }
+        }
+    }
+}
