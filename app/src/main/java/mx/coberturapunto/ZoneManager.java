@@ -46,6 +46,7 @@ public final class ZoneManager {
         this.networkMonitor = networkMonitor;
         this.tileProfile = tileProfile;
         loadZones();
+        refreshPinnedTiles();
     }
 
     public synchronized List<WorkZone> getHabitualZones() {
@@ -172,8 +173,8 @@ public final class ZoneManager {
             return;
         }
 
-        AtomicBoolean activeFlag = activeDownloads.computeIfAbsent(id, k -> new AtomicBoolean(true));
-        activeFlag.set(true);
+        AtomicBoolean activeFlag = activeDownloads.computeIfAbsent(id, k -> new AtomicBoolean(false));
+        if (!activeFlag.compareAndSet(false, true)) return;
 
         zone.status = WorkZone.Status.DOWNLOADING;
         saveZones();
@@ -215,21 +216,21 @@ public final class ZoneManager {
                     if (tileStorage.get(covSpec) != null) {
                         completed++;
                     } else {
-                        byte[] data = coordinator.getOrFetchSync(covSpec, 2500);
+                        byte[] data = coordinator.getOrFetchSync(covSpec, 2500, TileRequestCoordinator.PRIORITY_ZONE);
                         if (data != null && data.length > 0) completed++;
                         else failed++;
                     }
                 }
 
                 // 2. Base tile
-                String baseUrl = "https://mt1.google.com/vt/lyrs=m&x=" + c.x + "&y=" + c.y + "&z=" + z;
+                String baseUrl = tileProfile.baseTile(z, c.x, c.y);
                 TileSpec baseSpec = new TileSpec("coverage-v1", "base", "v1", "EPSG:900913", 256,
                         z, c.x, c.y, baseUrl, 30L * 24 * 3600 * 1000, false, true);
 
                 if (tileStorage.get(baseSpec) != null) {
                     completed++;
                 } else {
-                    byte[] data = coordinator.getOrFetchSync(baseSpec, 2500);
+                    byte[] data = coordinator.getOrFetchSync(baseSpec, 2500, TileRequestCoordinator.PRIORITY_ZONE);
                     if (data != null && data.length > 0) completed++;
                     else failed++;
                 }
@@ -261,8 +262,8 @@ public final class ZoneManager {
                 ZoneGeometry lodGeo = getGeometryForZoom(zone.geometry, centerLat, centerLon, z);
                 List<ZoneGeometry.TileCoord> coords = lodGeo.calculateIntersectingTiles(z);
                 for (ZoneGeometry.TileCoord c : coords) {
-                    String baseKey = "coverage-v1_base_v1_" + z + "_" + c.x + "_" + c.y;
-                    String covKey = "coverage-v1_fibra_v1_" + z + "_" + c.x + "_" + c.y;
+                    String baseKey = new TileSpec("coverage-v1", "base", "v1", "EPSG:900913", 256, z, c.x, c.y, "", 1, false, true).cacheKey();
+                    String covKey = new TileSpec("coverage-v1", "fibra", "v1", "EPSG:900913", 256, z, c.x, c.y, "", 1, true, false).cacheKey();
                     tileStorage.pinKey(baseKey);
                     tileStorage.pinKey(covKey);
                 }

@@ -2,11 +2,12 @@
 'use strict';
 if(!window.__mapProvider || location.origin!==window.__mapProvider.origin || window.__mapPerformance)return;
 
-  // Ultra-fluid 120 FPS Leaflet configuration (keepBuffer=24, updateInterval=5ms)
+  // Preserve the local Leaflet buffer and update interval configuration.
   let _leaflet = undefined;
   function patchLeaflet(l) {
     if(window.__mapDiscovery) window.__mapDiscovery.leaflet(l);
-    if (!l || !l.GridLayer || !l.GridLayer.prototype) return;
+    if (!l || !l.GridLayer || !l.GridLayer.prototype || l.GridLayer.prototype.__geoPinPatched) return;
+    l.GridLayer.prototype.__geoPinPatched = true;
     try {
       l.GridLayer.prototype.options.updateWhenIdle = false;
       l.GridLayer.prototype.options.updateInterval = 5;
@@ -35,7 +36,7 @@ if(!window.__mapProvider || location.origin!==window.__mapProvider.origin || win
               break;
             }
           }
-          if (origPruneTiles) origPruneTiles.call(this);
+          if (allCurrentLoaded) origPruneTiles.call(this);
         };
       }
     } catch (ignored) {}

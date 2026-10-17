@@ -112,6 +112,10 @@ public final class RasterVisualDetector {
         // 1. Instant RAM/Flash cache hit (0 ms, 0 network bytes)
         TileStorage.StoredTile cached = storage != null ? storage.get(spec) : null;
         if (cached != null) {
+            if (cached.isExpired() && networkMonitor.isOnline()) {
+                coordinator.requestTile(spec, TileRequestCoordinator.PRIORITY_VIEWPORT,
+                        "viewport", coordinator.getActiveSearchGeneration(), null);
+            }
             return buildWebResponse(cached.data, cached.etag, cached.lastModified, cached.isFallback);
         }
 
@@ -154,9 +158,7 @@ public final class RasterVisualDetector {
                 if (resp.isSuccessful() && resp.body() != null) {
                     byte[] data = resp.body().bytes();
                     if (data != null && data.length > 0) {
-                        if ((isFibra || isHfc) && data.length < 350) {
-                            EMPTY_TILES_REGISTRY.add(tileCoordKey);
-                        }
+
 
                         if (storage != null) {
                             storage.put(spec, data, resp.header("ETag"), resp.header("Last-Modified"));
@@ -220,7 +222,7 @@ public final class RasterVisualDetector {
                     x = Integer.parseInt(colStr);
                     y = Integer.parseInt(rowStr);
                     if (tileMatrixStr != null) {
-                        String cleanZ = tileMatrixStr.replaceAll("[^0-9]", "");
+                        String cleanZ = tileMatrixStr.substring(tileMatrixStr.lastIndexOf(':') + 1);
                         if (!cleanZ.isEmpty()) z = Integer.parseInt(cleanZ);
                     }
                 } catch (NumberFormatException ignored) {}
@@ -331,7 +333,7 @@ public final class RasterVisualDetector {
         TileSpec spec = new TileSpec("coverage-v1", "fibra", "v1", "EPSG:900913", 256,
                 17, tileCol, tileRow, profile.overlay(17, tileCol, tileRow), 7L * 24 * 3600 * 1000, true, false);
         if (storage != null) {
-            storage.pinPoint(17, tileCol, tileRow);
+            storage.pinPoint(spec);
         }
 
         if (coordinator == null) {

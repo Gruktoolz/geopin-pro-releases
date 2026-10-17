@@ -108,11 +108,11 @@ public final class TileStorage {
         pinnedRam.remove(key);
     }
 
-    public synchronized void pinPoint(int z, int x, int y) {
+    public synchronized void pinPoint(TileSpec spec) {
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
-                String k = z + "_" + (x + dx) + "_" + (y + dy);
-                pinnedKeys.add(k);
+                String k = spec.asZoom(spec.z, spec.x + dx, spec.y + dy).cacheKey();
+                pinKey(k);
             }
         }
     }
@@ -151,6 +151,20 @@ public final class TileStorage {
             }
         }
 
+        // Keep previously downloaded 1.0.7 tiles usable after the storage upgrade.
+        if ("coverage-v1".equals(spec.providerId)) {
+            File legacy = new File(new File(diskDir.getParentFile(), "tiles_storage"), spec.legacyKey() + ".png");
+            byte[] bytes = legacy.isFile() ? readFileBytes(legacy) : null;
+            if (bytes != null && bytes.length >= 32 && isValidImage(bytes)) {
+                long acquired = legacy.lastModified();
+                StoredTile migrated = new StoredTile(bytes, acquired, acquired, spec.ttlMillis,
+                        null, null, false, spec.z);
+                hotRamCache.put(key, migrated);
+                if (pinnedKeys.contains(key)) pinnedRam.put(key, migrated);
+                saveTileToDiskAtomic(key, migrated);
+                return migrated;
+            }
+        }
         return null;
     }
 
@@ -159,7 +173,7 @@ public final class TileStorage {
      * and performs atomic swap to guarantee zero corrupted or empty slots.
      */
     public synchronized void put(TileSpec spec, byte[] data, String etag, String lastModified) {
-        if (spec == null || data == null || data.length < 32 || !isPng(data)) {
+        if (spec == null || data == null || data.length < 32 || !isValidImage(data)) {
             return;
         }
 
@@ -274,16 +288,13 @@ public final class TileStorage {
         return null;
     }
 
-    private boolean isPng(byte[] data) {
-        return data.length >= 8 &&
-                data[0] == (byte) 0x89 &&
-                data[1] == (byte) 'P' &&
-                data[2] == (byte) 'N' &&
-                data[3] == (byte) 'G' &&
-                data[4] == (byte) 0x0D &&
-                data[5] == (byte) 0x0A &&
-                data[6] == (byte) 0x1A &&
-                data[7] == (byte) 0x0A;
+    private boolean isValidImage(byte[] data) {
+        // Base tiles may be JPEG; reject truncated/HTML responses before replacing valid data.
+        Bitmap image = BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (image == null) return false;
+        boolean valid = image.getWidth() > 0 && image.getHeight() > 0;
+        image.recycle();
+        return valid;
     }
 
     private boolean isValidTileFile(File f) {
@@ -300,7 +311,7 @@ public final class TileStorage {
         try (FileOutputStream fos = new FileOutputStream(tempFile)) {
             fos.write(tile.data);
             fos.flush();
-            tempFile.renameTo(targetFile);
+            if (!tempFile.renameTo(targetFile)) throw new IOException("Tile replacement failed");
             writeMetadata(metaFile, tile);
         } catch (IOException ignored) {
             if (tempFile.exists()) tempFile.delete();
@@ -309,7 +320,7 @@ public final class TileStorage {
 
     private StoredTile readTileFromDisk(File file, String key, long defaultTtl) {
         byte[] data = readFileBytes(file);
-        if (data == null || data.length < 32 || !isPng(data)) {
+        if (data == null || data.length < 32 || !isValidImage(data)) {
             file.delete(); // Delete corrupt file
             return null;
         }
@@ -396,11 +407,11 @@ public final class TileStorage {
                 fos.write(data);
                 fos.flush();
             }
-            temp.renameTo(f);
+            if (!temp.renameTo(f)) throw new IOException("Web asset replacement failed");
 
             org.json.JSONObject obj = new org.json.JSONObject();
-            obj.put(url, url);
-            obj.put(mimeType, mimeType);
+            obj.put("url", url);
+            obj.put("mimeType", mimeType);
             obj.put("ts", System.currentTimeMillis());
             try (FileWriter fw = new FileWriter(meta)) {
                 fw.write(obj.toString());

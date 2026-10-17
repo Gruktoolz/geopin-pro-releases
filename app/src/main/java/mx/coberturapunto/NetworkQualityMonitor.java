@@ -51,7 +51,8 @@ public final class NetworkQualityMonitor {
     private final AtomicInteger targetConcurrency = new AtomicInteger(2);
 
     // Transport flags
-    private final AtomicBoolean isWifi = new AtomicBoolean(true); // default true unless detected otherwise
+    private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicBoolean isWifi = new AtomicBoolean(false); // Fail closed until the transport is known
     private final AtomicBoolean isMetered = new AtomicBoolean(false);
 
     NetworkQualityMonitor() {}
@@ -70,6 +71,7 @@ public final class NetworkQualityMonitor {
             cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                    connected.set(true);
                     boolean wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
                     boolean metered = !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
                     isWifi.set(wifi);
@@ -78,6 +80,9 @@ public final class NetworkQualityMonitor {
 
                 @Override
                 public void onLost(Network network) {
+                    connected.set(false);
+                    isWifi.set(false);
+                    isMetered.set(true);
                     consecutiveErrors.incrementAndGet();
                     targetConcurrency.set(1);
                 }
@@ -88,9 +93,13 @@ public final class NetworkQualityMonitor {
     private void updateFromConnectivityManager(ConnectivityManager cm) {
         try {
             Network active = cm.getActiveNetwork();
+            connected.set(false);
+            isWifi.set(false);
+            isMetered.set(true);
             if (active != null) {
                 NetworkCapabilities caps = cm.getNetworkCapabilities(active);
                 if (caps != null) {
+                    connected.set(true);
                     isWifi.set(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI));
                     isMetered.set(!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED));
                 }
@@ -104,6 +113,7 @@ public final class NetworkQualityMonitor {
 
     public void setWifiConnected(boolean wifi) {
         this.isWifi.set(wifi);
+        connected.set(true);
     }
 
     public boolean isMetered() {
@@ -203,7 +213,7 @@ public final class NetworkQualityMonitor {
     }
 
     public boolean isOnline() {
-        return getQualityGrade() != QualityGrade.OFFLINE;
+        return connected.get() && getQualityGrade() != QualityGrade.OFFLINE;
     }
 
     /**
@@ -211,7 +221,7 @@ public final class NetworkQualityMonitor {
      * speculative neighbor prefetching must be suspended so it never blocks queries.
      */
     public boolean isPrefetchAllowed() {
-        return getQualityGrade() != QualityGrade.VERY_POOR &&
+        return isWifiConnected() && !isMetered.get() && getQualityGrade() != QualityGrade.VERY_POOR &&
                getQualityGrade() != QualityGrade.OFFLINE &&
                consecutiveErrors.get() == 0;
     }

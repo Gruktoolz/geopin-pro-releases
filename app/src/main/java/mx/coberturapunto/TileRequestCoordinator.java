@@ -185,6 +185,10 @@ public final class TileRequestCoordinator {
      * Synchronous request for point evaluation with bounded timeout.
      */
     public byte[] getOrFetchSync(TileSpec spec, int timeoutMs) {
+        return getOrFetchSync(spec, timeoutMs, PRIORITY_SELECTED_POINT);
+    }
+
+    public byte[] getOrFetchSync(TileSpec spec, int timeoutMs, int priority) {
         if (spec == null) return null;
 
         // 1. Check storage immediately
@@ -197,7 +201,7 @@ public final class TileRequestCoordinator {
         final CompletableFuture<byte[]> future = new CompletableFuture<>();
         String cid = "sync_query_" + System.nanoTime();
 
-        requestTile(spec, PRIORITY_SELECTED_POINT, cid, activeSearchGeneration.get(), new TileCallback() {
+        requestTile(spec, priority, cid, activeSearchGeneration.get(), new TileCallback() {
             @Override
             public void onSuccess(byte[] data, boolean fromCache, boolean isFallback) {
                 if (!isFallback) {
@@ -320,7 +324,7 @@ public final class TileRequestCoordinator {
                 networkMonitor.recordFailure(isTimeout);
             }
         } finally {
-            inFlight.remove(task.cacheKey);
+            inFlight.remove(task.cacheKey, task);
             activeDownloads.decrementAndGet();
 
             notifyConsumers(task, downloadedData, success, httpCode);
