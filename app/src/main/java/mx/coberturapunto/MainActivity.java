@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
     private String currentSource="other";
     private String currentCity="";
     private String currentQueryId="";
+    private String coverageEvaluationId="";
     private final Runnable locationTimeout=()->{
         if(locationLoading){
             activeQuery=0;
@@ -60,6 +61,9 @@ public class MainActivity extends Activity {
     private Runnable captureFeedbackCleanup;
     private int normalOrientation;
     private long captureStartTime;
+    private JSONObject captureZone;
+    private int workZoneRevision;
+    private int pointZoom=18;
     private final java.util.concurrent.ExecutorService worker=Executors.newSingleThreadExecutor();
     private int lookupGeneration;
     private boolean ready;
@@ -117,7 +121,7 @@ public class MainActivity extends Activity {
             if(event.getAction()==android.view.MotionEvent.ACTION_DOWN){
                 if(LocationInput.isCoordinate(input.getText().toString())){
                     input.setText("");
-                }
+                }else if(suggestions!=null)suggestions.expand();
             }
             return false;
         });
@@ -137,11 +141,17 @@ public class MainActivity extends Activity {
             PopupMenu options=new PopupMenu(this,menu);
             options.getMenu().add("Cambiar enlace del mapa").setOnMenuItemClickListener(item->{
                 startActivity(new Intent(this,BookmarkActivity.class).putExtra("edit",true));return true;
+            });
+            options.getMenu().add("Fuentes de búsqueda").setOnMenuItemClickListener(item->{
+                new AlertDialog.Builder(this).setTitle("Fuentes de búsqueda").setMessage(asset("search/SOURCES.txt")).setPositiveButton("Cerrar",null).show();return true;
             });options.show();
         });root.addView(row);
-        LinearLayout suggestionPanel=new LinearLayout(this);root.addView(suggestionPanel);
+        LinearLayout suggestionPanel=new LinearLayout(this);
         searchMemory=new SearchMemory(this);
         suggestions=new AddressSuggestions(this,input,suggestionPanel,surfaceColor,inkColor,accentColor,searchMemory,address->{
+            if(!address.hasLatitude() || !address.hasLongitude()){
+                resolveInput(address.getAddressLine(0));return;
+            }
             lookupGeneration++;
             currentCity=address.getLocality()!=null?address.getLocality():"";
             selectAndQuery(new LocationInput.Point(address.getLatitude(),address.getLongitude()),"search");
@@ -150,8 +160,20 @@ public class MainActivity extends Activity {
         activityProgress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
         activityProgress.setIndeterminate(true);activityProgress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(accentColor));
         root.addView(activityProgress,new LinearLayout.LayoutParams(-1,dp(2)));
-        webFrame=new CaptureFrame(this);webFrame.setBackgroundColor(backgroundColor);root.addView(webFrame,new LinearLayout.LayoutParams(-1,0,1));
-        web=new WebView(this);webFrame.addView(web,new FrameLayout.LayoutParams(-1,-1,android.view.Gravity.CENTER));
+        FrameLayout mapArea=new FrameLayout(this);
+        root.addView(mapArea,new LinearLayout.LayoutParams(-1,0,1));
+        webFrame=new CaptureFrame(this);webFrame.setBackgroundColor(backgroundColor);mapArea.addView(webFrame,new FrameLayout.LayoutParams(-1,-1));
+        FrameLayout.LayoutParams suggestionParams=new FrameLayout.LayoutParams(-1,-2,android.view.Gravity.TOP);
+        suggestionParams.setMargins(dp(8),dp(8),dp(8),0);
+        mapArea.addView(suggestionPanel,suggestionParams);
+        web=new WebView(this);
+        suggestions.setMirror(new AddressSuggestions.Mirror(){
+            public void request(String text,int id,boolean fromWeb){searchScript("request("+JSONObject.quote(text)+","+id+","+fromWeb+")");}
+            public void results(String text,int id,org.json.JSONArray rows){searchScript("results("+JSONObject.quote(text)+","+id+","+rows.toString()+")");}
+            public void selected(String label){searchScript("selected("+JSONObject.quote(label)+")");}
+            public void dismiss(){searchScript("dismiss()");}
+        });
+        webFrame.addView(web,new FrameLayout.LayoutParams(-1,-1,android.view.Gravity.CENTER));
         web.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{
             if(r-l!=or-ol || b-t!=ob-ot){
                 Runnable inv=()->web.evaluateJavascript("if(window.map && window.map.invalidateSize)window.map.invalidateSize({animate:false});",null);
@@ -184,6 +206,16 @@ public class MainActivity extends Activity {
             if(!mainFrame || !ORIGIN.equals(origin.toString())) return;
             try {
                 JSONObject value=new JSONObject(message.getData());
+                String messageType=value.optString("type");
+                if(messageType.equals("search-edit")){
+                    String text=value.optString("text","");if(text.length()<=300)suggestions.fromWeb(text);return;
+                }
+                if(messageType.equals("search-results")){suggestions.receiveWebsite(value.optInt("generation",-1),value.optJSONArray("rows"));return;}
+                if(messageType.equals("search-select")){suggestions.chooseWeb(value.optInt("generation",-1),value.optInt("row",-1));return;}
+                if(messageType.equals("search-blur")){suggestions.webBlurred();return;}
+                if(messageType.equals("search-submit")){
+                    String text=value.optString("text","");if(text.length()<=300)resolveInput(text);return;
+                }
                 if(value.optString("type").equals("map-ready")){
                     runOnUiThread(()->{
                         ready=true;center.setEnabled(true);setBusy(false,"Mapa listo");
@@ -200,6 +232,7 @@ public class MainActivity extends Activity {
                 if(value.optString("type").equals("point")) {
                     LocationInput.Point point=new LocationInput.Point(value.getDouble("lat"),value.getDouble("lon"));
                     String src=value.optString("source","other");
+                    currentCity="";
                     selectAndQuery(point,src.equals("center")?"fix_center":"other");
                 }
             } catch (Exception ignored) { }
@@ -234,7 +267,7 @@ public class MainActivity extends Activity {
                 // Keep only the coverage site as a top-level page; its resource and CAPTCHA frames still load normally.
                 return request.isForMainFrame() && !trusted(request.getUrl());
             }
-            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){setBusy(true,"Cargando mapa");loadGeneration++;ready=false;providerUnsupported=false;center.setEnabled(false);captureButton.setEnabled(true);}
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){setBusy(true,"Cargando mapa");loadGeneration++;ready=false;providerUnsupported=false;coverageEvaluationId="";center.setEnabled(false);captureButton.setEnabled(true);}
             @Override public void onPageCommitVisible(WebView view,String url){if(trusted(Uri.parse(url)))prepareMap(loadGeneration,0);}
             @Override public void onPageFinished(WebView view,String url){
                 if(!trusted(Uri.parse(url))) return;
@@ -248,7 +281,10 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        if(state!=null && state.containsKey("lat")) {select(new LocationInput.Point(state.getDouble("lat"),state.getDouble("lon")));autoQueryPending=true;}
+        if(state!=null && state.containsKey("lat")) {
+            select(new LocationInput.Point(state.getDouble("lat"),state.getDouble("lon")));pointZoom=state.getInt("pointZoom",18);
+            currentCity=state.getString("city","");searchMemory.setActiveArea(pending.lat(),pending.lon(),currentCity);suggestions.areaChanged();autoQueryPending=true;
+        }
         boolean debug=(getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE)!=0;
         if(debug && getIntent().getBooleanExtra("self_test",false)) {
             web.loadDataWithBaseURL(ORIGIN+"/", "<html><body>Prueba funcional del proveedor virtual<script>"+asset("virtual-location-selftest.js")+"</script></body></html>","text/html","UTF-8",null);
@@ -258,8 +294,12 @@ public class MainActivity extends Activity {
                 LocationInput.Point last = LastContextStore.getLastLocation(this);
                 if (last != null) {
                     select(last);
+                    pointZoom=Math.max(5,Math.min(20,LastContextStore.getLastZoom(this)));
                     autoQueryPending = true;
                     currentCity = LastContextStore.getLastCity(this);
+                    searchMemory.setActiveArea(last.lat(),last.lon(),currentCity);
+                    suggestions.areaChanged();
+                    suggestions.enrich(last.lat(),last.lon(),city->{});
                     if (!currentCity.isEmpty()) input.setText(currentCity);
                 }
                 receive(getIntent());
@@ -309,6 +349,7 @@ public class MainActivity extends Activity {
     }
     private void onMapMoved(){
         if(!locationLoading && !isFinishing() && !isDestroyed()){
+            coverageEvaluationId="";
             center.setText("Fijar centro");
             center.setContentDescription("Fijar centro y consultar cobertura");
             center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(1,onAccentColor,getResources().getDisplayMetrics().density),null,null,null);
@@ -319,6 +360,7 @@ public class MainActivity extends Activity {
         activeQuery=0;locationLoading=false;cacheHandler.removeCallbacks(locationTimeout);
         setBusy(false,success?"Ubicación lista":"No se pudo consultar");
         if(!success){
+            coverageEvaluationId="";
             String stage=details.optString("stage","other");
             AppTelemetry.locationError(stage,currentSource,currentCity,pending!=null?pending.lat():null,pending!=null?pending.lon():null);
             showError("No se pudo completar la consulta. Intenta fijar el punto otra vez.");
@@ -336,6 +378,9 @@ public class MainActivity extends Activity {
         currentQueryId = "";
 
         if(queryPoint != null){
+            coverageEvaluationId=queryId;
+            center.setText("Revisando cobertura…");
+            center.setContentDescription("Revisando la cobertura de fibra en el punto seleccionado");
             new Thread(() -> {
                 RasterVisualDetector.VisualEvaluation eval =
                         mapEngine.evaluate(queryPoint.lat(), queryPoint.lon(), queryId);
@@ -343,43 +388,41 @@ public class MainActivity extends Activity {
                 if (eval.isYellow()) {
                     AppTelemetry.locationReadyYellow(queryId, queryPoint.lat(), queryPoint.lon(),
                             source, city, totalMs, colonyMs, tilesMs, mapState, eval);
-                    runOnUiThread(() -> {
-                        if (!isDestroyed() && !locationLoading) {
-                            center.setText("Con fibra en el punto");
-                            center.setContentDescription("Con fibra óptica en el punto");
-                            center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(3, onAccentColor, getResources().getDisplayMetrics().density), null, null, null);
-                        }
-                    });
+                    runOnUiThread(() -> showCoverageResult(queryId,eval));
                 } else if (eval.isWhite()) {
                     AppTelemetry.whiteConfirmed(eval);
-                    runOnUiThread(() -> {
-                        if (!isDestroyed() && !locationLoading) {
-                            center.setText("Sin fibra en el punto");
-                            center.setContentDescription("Sin cobertura de fibra en el punto");
-                            center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(5, onAccentColor, getResources().getDisplayMetrics().density), null, null, null);
-                        }
-                    });
+                    runOnUiThread(() -> showCoverageResult(queryId,eval));
                 } else if (eval.isDataMissing()) {
                     AppTelemetry.locationIndeterminate(eval);
-                    runOnUiThread(() -> {
-                        if (!isDestroyed() && !locationLoading) {
-                            center.setText("Dato no disponible");
-                            center.setContentDescription("Dato de cobertura no disponible para este punto");
-                            center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(4, onAccentColor, getResources().getDisplayMetrics().density), null, null, null);
-                        }
-                    });
+                    runOnUiThread(() -> showCoverageResult(queryId,eval));
                 } else {
                     AppTelemetry.locationIndeterminate(eval);
+                    runOnUiThread(() -> showCoverageResult(queryId,eval));
                 }
                 mapEngine.prefetch(queryPoint.lat(), queryPoint.lon());
             }, "FiberVisualWorker").start();
         }
         if(foreground && hasWindowFocus()){
             feedbackSounds.location();center.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-            center.setText("Ubicación lista");center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(3,onAccentColor,getResources().getDisplayMetrics().density),null,null,null);
-            center.announceForAccessibility("Ubicación lista");
+            center.announceForAccessibility("Punto seleccionado; revisando cobertura");
         }
         if((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE)!=0)android.util.Log.i("CoverageFeedback","location-ready id="+id+" state="+mapState);
+    }
+    private void showCoverageResult(String queryId,RasterVisualDetector.VisualEvaluation result){
+        if(isFinishing()||isDestroyed()||locationLoading||!queryId.equals(coverageEvaluationId))return;
+        String label,description;int icon;
+        if(result.isYellow()){
+            label="Con fibra en el punto";description="El mapa indica cobertura de fibra en este punto";icon=3;
+        }else if(result.isWhite()){
+            label="Sin fibra en el punto";description="El mapa no muestra cobertura de fibra en este punto";icon=5;
+        }else if(result.isDataMissing()){
+            label="Dato no disponible";description="No hay datos suficientes para confirmar la cobertura en este punto";icon=4;
+        }else{
+            label="Cobertura sin confirmar";description="La imagen del mapa no permite confirmar si hay cobertura en este punto";icon=4;
+        }
+        center.setText(label);center.setContentDescription(description);
+        center.setCompoundDrawablesRelativeWithIntrinsicBounds(new NativeUi.Icon(icon,onAccentColor,getResources().getDisplayMetrics().density),null,null,null);
+        center.announceForAccessibility(description);
     }
     private void prepareMap(int generation,int attempt){
         if(ready || generation!=loadGeneration || isFinishing() || isDestroyed())return;
@@ -388,6 +431,7 @@ public class MainActivity extends Activity {
             if(ready || generation!=loadGeneration || isFinishing() || isDestroyed())return;
             if("true".equals(result)){
                 ready=true;setBusy(false,"Mapa listo");center.setEnabled(true);captureButton.setEnabled(true);
+                suggestions.pageReady();
                 if(autoQueryPending)query();
                 if((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE)!=0 && getIntent().getBooleanExtra("integration_test",false)){
                     getIntent().removeExtra("integration_test");web.evaluateJavascript(asset("integration-test.js"),null);
@@ -407,10 +451,38 @@ public class MainActivity extends Activity {
         if(captureSaving)return true;
         return super.dispatchTouchEvent(event);
     }
+    private void searchScript(String call){
+        if(web!=null)web.evaluateJavascript("window.__searchMirror && window.__searchMirror."+call,null);
+    }
+    private void rememberWorkZone(LocationInput.Point point,String city,int zoom){
+        int revision=++workZoneRevision;
+        pending=point;pointZoom=zoom;
+        currentCity=city==null?"":city;
+        searchMemory.rememberWorkArea(point.lat(),point.lon(),currentCity);
+        LastContextStore.save(this,point.lat(),point.lon(),currentCity,zoom);
+        suggestions.areaChanged();
+        suggestions.enrich(point.lat(),point.lon(),found->{
+            if(revision!=workZoneRevision || isFinishing() || isDestroyed())return;
+            if(currentCity.isEmpty()){
+                currentCity=found.name();searchMemory.rememberWorkArea(point.lat(),point.lon(),currentCity);
+                LastContextStore.save(this,point.lat(),point.lon(),currentCity,zoom);suggestions.areaChanged();
+            }
+        });
+    }
     private void startCapture(){
         if(captureSaving)return;
+        if(!ready || web==null){showError("El mapa todavía no está disponible.");return;}
+        captureSaving=true;captureButton.setEnabled(false);
+        web.evaluateJavascript("window.__coverageAdapter && window.__coverageAdapter.snapshot ? window.__coverageAdapter.snapshot() : null",value->{
+            if(isFinishing() || isDestroyed()){restoreCaptureUi();return;}
+            captureZone=null;
+            try{JSONObject snapshot=new JSONObject(value);new LocationInput.Point(snapshot.getDouble("lat"),snapshot.getDouble("lon"));captureZone=snapshot;}catch(Exception ignored){}
+            beginCapture();
+        });
+    }
+    private void beginCapture(){
         if(!ready || web==null || web.getWidth()<=0 || web.getHeight()<=0){
-            showError("El mapa todavía no está disponible.");return;
+            restoreCaptureUi();showError("El mapa todavía no está disponible.");return;
         }
         suggestions.dismiss();
         dismissCaptureFeedback();
@@ -469,6 +541,10 @@ public class MainActivity extends Activity {
                             android.util.Log.i("CoverageCapture","saved9x16="+width+"x"+height+" uri="+saved);
                         runOnUiThread(()->{
                             if(!isFinishing() && !isDestroyed()){
+                                if(captureZone!=null)try{
+                                    lookupGeneration++;activeQuery=0;locationLoading=false;cacheHandler.removeCallbacks(locationTimeout);
+                                    rememberWorkZone(new LocationInput.Point(captureZone.getDouble("lat"),captureZone.getDouble("lon")),"",captureZone.optInt("zoom",17));
+                                }catch(Exception ignored){}
                                 showCaptureFeedback();
                             }else{
                                 restoreCaptureUi();
@@ -550,11 +626,9 @@ public class MainActivity extends Activity {
     private void select(LocationInput.Point point){autoQueryPending=false;pending=point; center.setEnabled(ready);}
     private void selectAndQuery(LocationInput.Point point,String source){
         if(locationLoading && pending!=null && Math.abs(pending.lat()-point.lat())<1e-5 && Math.abs(pending.lon()-point.lon())<1e-5) return;
-        suggestions.dismiss();input.clearFocus();select(point);autoQueryPending=true;
+        coverageEvaluationId="";suggestions.dismiss();input.clearFocus();select(point);pointZoom=18;autoQueryPending=true;
         currentSource=source!=null?source:"other";
-        SearchMemory.Area area=searchMemory.area();
-        if(currentCity.isEmpty() && area!=null && area.city!=null) currentCity=area.city;
-        LastContextStore.save(this, point.lat(), point.lon(), currentCity, 17);
+        rememberWorkZone(point,currentCity,18);
         currentQueryId=java.util.UUID.randomUUID().toString();
         mapEngine.startQuery(currentQueryId);
         query();
@@ -572,7 +646,7 @@ public class MainActivity extends Activity {
         final int requestId=++querySequence;activeQuery=requestId;locationLoading=true;
         setBusy(true,"Consultando ubicación");cacheHandler.removeCallbacks(locationTimeout);cacheHandler.postDelayed(locationTimeout,20000);
         ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);
-        String script=String.format(Locale.US,"window.__coverageAdapter ? window.__coverageAdapter.query(%.8f,%.8f,%d) : 'not-ready'",pending.lat(),pending.lon(),requestId);
+        String script=String.format(Locale.US,"window.__coverageAdapter ? window.__coverageAdapter.query(%.8f,%.8f,%d,%d) : 'not-ready'",pending.lat(),pending.lon(),requestId,pointZoom);
         web.evaluateJavascript(script,result->{
             if(activeQuery==requestId && !"\"requested\"".equals(result)){
                 AppTelemetry.locationError("webview",currentSource,currentCity,pending!=null?pending.lat():null,pending!=null?pending.lon():null);
@@ -614,7 +688,7 @@ public class MainActivity extends Activity {
                 if(p!=null){
                     final LocationInput.Point found=p;
                     final String src=LocationInput.isCoordinate(text)?"coordinates":currentSource;
-                    runOnUiThread(()->{if(generation==lookupGeneration)selectAndQuery(found,src);});
+                    runOnUiThread(()->{if(generation==lookupGeneration){currentCity="";selectAndQuery(found,src);}});
                     return;
                 }
                 String geoAddress=LocationInput.geoAddress(text);
@@ -638,6 +712,7 @@ public class MainActivity extends Activity {
                     if(filtered.size()==1){
                         Address a=filtered.get(0);
                         searchMemory.remember(a);suggestions.areaChanged();
+                        input.setText(a.getAddressLine(0));searchScript("selected("+JSONObject.quote(a.getAddressLine(0))+")");
                         currentCity=a.getLocality()!=null?a.getLocality():"";
                         selectAndQuery(new LocationInput.Point(a.getLatitude(),a.getLongitude()),"search");
                         return;
@@ -648,6 +723,7 @@ public class MainActivity extends Activity {
                         if(generation!=lookupGeneration)return;
                         Address a=filtered.get(n);
                         searchMemory.remember(a);suggestions.areaChanged();
+                        input.setText(a.getAddressLine(0));searchScript("selected("+JSONObject.quote(a.getAddressLine(0))+")");
                         currentCity=a.getLocality()!=null?a.getLocality():"";
                         selectAndQuery(new LocationInput.Point(a.getLatitude(),a.getLongitude()),"search");
                     }).setNegativeButton("Cancelar",null).show();
@@ -677,7 +753,7 @@ public class MainActivity extends Activity {
         }
         throw new IllegalArgumentException("El enlace tiene demasiadas redirecciones.");
     }
-    @Override protected void onSaveInstanceState(Bundle out){if(input!=null)out.putString("inputText",input.getText().toString());out.putInt("normalOrientation",normalOrientation);if(pending!=null){out.putDouble("lat",pending.lat());out.putDouble("lon",pending.lon());out.putBoolean("autoQueryPending",autoQueryPending);}super.onSaveInstanceState(out);}
+    @Override protected void onSaveInstanceState(Bundle out){if(input!=null)out.putString("inputText",input.getText().toString());out.putInt("normalOrientation",normalOrientation);if(pending!=null){out.putDouble("lat",pending.lat());out.putDouble("lon",pending.lon());out.putInt("pointZoom",pointZoom);out.putString("city",currentCity);out.putBoolean("autoQueryPending",autoQueryPending);}super.onSaveInstanceState(out);}
     @Override protected void onDestroy(){foreground=false;if(appUpdater!=null)appUpdater.close();dismissCaptureFeedback();cacheHandler.removeCallbacks(cacheMaintenance);lookupGeneration++;worker.shutdownNow();if(suggestions!=null)suggestions.close();cacheHandler.removeCallbacks(locationTimeout);if(feedbackSounds!=null)feedbackSounds.close();if(web!=null)web.destroy();super.onDestroy();}
 
 }

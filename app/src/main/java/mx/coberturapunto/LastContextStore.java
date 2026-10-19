@@ -21,8 +21,8 @@ public final class LastContextStore {
         if (context == null) return;
         SharedPreferences sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         sp.edit()
-                .putFloat(KEY_LAT, (float) lat)
-                .putFloat(KEY_LON, (float) lon)
+                .putString(KEY_LAT, Double.toString(lat))
+                .putString(KEY_LON, Double.toString(lon))
                 .putString(KEY_CITY, city != null ? city : "")
                 .putInt(KEY_ZOOM, zoom > 0 ? zoom : 17)
                 .putLong(KEY_TIME, System.currentTimeMillis())
@@ -43,10 +43,16 @@ public final class LastContextStore {
             }
             return null;
         }
-        double lat = sp.getFloat(KEY_LAT, 0f);
-        double lon = sp.getFloat(KEY_LON, 0f);
+        double lat = coordinate(sp, KEY_LAT);
+        double lon = coordinate(sp, KEY_LON);
         if (lat == 0f && lon == 0f) return null;
         return new LocationInput.Point(lat, lon);
+    }
+
+    private static double coordinate(SharedPreferences sp,String key){
+        Object value=sp.getAll().get(key);
+        if(value instanceof Number)return ((Number)value).doubleValue();
+        try{return Double.parseDouble(String.valueOf(value));}catch(NumberFormatException ignored){return 0;}
     }
 
     public static String getLastCity(Context context) {
