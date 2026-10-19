@@ -326,6 +326,7 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             });
         }
+        AnnouncementClient.check(this);
     }
     private void configurePalette(){
         darkTheme=(getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;
