@@ -1,0 +1,31 @@
+Catálogo de búsqueda de GeoPin Pro — versión 1, preparado el 17 de octubre de 2026.
+
+GeoNames, https://www.geonames.org/
+Fuente: https://download.geonames.org/export/dump/MX.zip
+Licencia: Creative Commons Attribution 4.0, https://creativecommons.org/licenses/by/4.0/
+Transformaciones: selección de lugares poblados actuales; normalización de nombres,
+agrupación administrativa e índice de búsqueda. No se generan coordenadas.
+Las coordenadas son referencias del lugar, no números de puerta ni límites de cobertura.
+
+INEGI, Catálogo Único de Claves Geoestadísticas y Marco Geoestadístico, diciembre de 2025.
+https://www.inegi.org.mx/servicios/catalogounico.html
+Datos precargados: asentamientos y vialidades de Tijuana, Baja California.
+https://gaia.inegi.org.mx/wscatgeo/v2/asentamientos/02/004
+https://gaia.inegi.org.mx/wscatgeo/v2/geo/vialidades/02/004
+Transformaciones: índice de nombres; un punto perteneciente a un segmento representativo
+para cada vialidad. Asentamientos tabulares sin geometría requieren resolver la dirección
+al seleccionarlos: nunca se reemplazan por el centro de Tijuana.
+Los datos municipales adicionales se guardan en el teléfono al fijar una zona con conexión.
+Las fuentes no garantizan exactitud ni exhaustividad. Ninguna entrada implica cobertura MEGA.
+
+Las sugerencias aportadas por MEGA y por el geocodificador del dispositivo conservan su
+fuente y no se exportan al catálogo distribuido.
+Reproducción: tools/build-search-catalog.py; los archivos de origen no se incluyen.
+El gzip resultante se almacena como dos partes ordenadas para respetar el límite de
+subida web de GitHub. La app las concatena en streaming antes de descomprimirlas.
+Tamaño gzip original: 34,268,870 bytes; SHA-256:
+d6586230902fc321dc7b69576b9fe38a7b2bd05f01e98bedcf5bdf3fecc8f386
+mexico-v1.db.bin.001 (17,134,435 bytes), SHA-256:
+2fff935d2632a1b623fc72ba68df038e590d2ad091ed1baee55f7c82f7f48c9c
+mexico-v1.db.bin.002 (17,134,435 bytes), SHA-256:
+0822daa9f03f2c854465c337ffa7e20fbe4395890330c45759ae75f49e85e9bf
