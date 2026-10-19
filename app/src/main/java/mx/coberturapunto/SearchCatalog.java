@@ -23,7 +23,10 @@ final class SearchCatalog implements AutoCloseable {
         File target=new File(context.getFilesDir(),"mexico-search-v1.db");
         if(!target.exists()){
             File staging=new File(context.getFilesDir(),"mexico-search-v1.tmp");
-            try(InputStream in=new GZIPInputStream(context.getAssets().open("search/mexico-v1.db.bin"));OutputStream out=new FileOutputStream(staging)){
+            InputStream pieces=new SequenceInputStream(
+                    context.getAssets().open("search/mexico-v1.db.bin.001"),
+                    context.getAssets().open("search/mexico-v1.db.bin.002"));
+            try(InputStream in=new GZIPInputStream(pieces);OutputStream out=new FileOutputStream(staging)){
                 byte[] buffer=new byte[32768];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);
             }
             if(!staging.renameTo(target))throw new IOException("No se pudo preparar el catálogo");
