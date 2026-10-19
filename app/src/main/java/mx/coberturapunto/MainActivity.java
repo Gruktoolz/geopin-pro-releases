@@ -142,9 +142,7 @@ public class MainActivity extends Activity {
             options.getMenu().add("Cambiar enlace del mapa").setOnMenuItemClickListener(item->{
                 startActivity(new Intent(this,BookmarkActivity.class).putExtra("edit",true));return true;
             });
-            options.getMenu().add("Fuentes de búsqueda").setOnMenuItemClickListener(item->{
-                new AlertDialog.Builder(this).setTitle("Fuentes de búsqueda").setMessage(asset("search/SOURCES.txt")).setPositiveButton("Cerrar",null).show();return true;
-            });options.show();
+            options.show();
         });root.addView(row);
         LinearLayout suggestionPanel=new LinearLayout(this);
         searchMemory=new SearchMemory(this);
