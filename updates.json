@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "packageName": "mx.coberturapunto",
-  "latestVersionCode": 42,
-  "latestVersionName": "1.0.17",
+  "latestVersionCode": 43,
+  "latestVersionName": "1.0.18",
   "minSupportedVersionCode": 42,
-  "sha256": "8179dff6981dba0dcfde09e5c942309aa80b2a56e40d0d3975be80bb72174cb8",
-  "sizeBytes": 37625701,
-  "notes": "Mejoras de búsqueda y sugerencias para tus zonas de trabajo.",
-  "downloadUrl": "https://github.com/Gruktoolz/geopin-pro-releases/releases/download/v1.0.17/GeoPin-Pro-1.0.17.apk"
+  "sha256": "f12f3d899a48ffef15fe870728ae93f8631c112fec5ab3861d73ca117d2cb8ef",
+  "sizeBytes": 37625163,
+  "notes": "Menú de opciones simplificado y mejoras de búsqueda.",
+  "downloadUrl": "https://github.com/Gruktoolz/geopin-pro-releases/releases/download/v1.0.18/GeoPin-Pro-1.0.18.apk"
 }
