@@ -28,17 +28,24 @@
   return true;
  }
  window.__coverageAdapter=Object.freeze({ready:attach,
+  snapshot(){try{if(!attach())return null;let p,z;
+   if(engine==='leaflet'){const v=bound.containerPointToLatLng(bound.getSize().divideBy(2));p={lat:v.lat,lon:v.lng};z=bound.getZoom();}
+   else if(engine==='gl'){const v=bound.getCenter();p={lat:v.lat,lon:v.lng};z=bound.getZoom();}
+   else{p=unproject(bound.getView().getCenter(),projection(bound));z=bound.getView().getZoom();}
+   return valid(p.lat,p.lon)?{lat:p.lat,lon:p.lon,zoom:z}:null;
+  }catch(ignored){return null;}},
   center(){try{if(!attach())return false;let p;
    if(engine==='leaflet'){const v=bound.containerPointToLatLng(bound.getSize().divideBy(2));p={lat:v.lat,lon:v.lng};}
    else if(engine==='gl'){const v=bound.getCenter();p={lat:v.lat,lon:v.lng};}
    else p=unproject(bound.getView().getCenter(),projection(bound));
    if(!valid(p.lat,p.lon))return false;notify({type:'point',source:'center',lat:p.lat,lon:p.lon});return true;
   }catch(ignored){return false;}},
-  query(lat,lon,id=0){try{
+  query(lat,lon,id=0,zoom=18){try{
    if(!valid(lat,lon))return 'invalid-point';if(!attach())return 'not-ready';
-   if(engine==='leaflet')bound.setView([lat,lon],18,{animate:false});
-   else if(engine==='gl')bound.jumpTo({center:[lon,lat],zoom:18});
-   else{const view=bound.getView();view.setCenter(project(lon,lat,projection(bound)));view.setZoom(18);}
+   zoom=Math.max(5,Math.min(20,zoom));
+   if(engine==='leaflet')bound.setView([lat,lon],zoom,{animate:false});
+   else if(engine==='gl')bound.jumpTo({center:[lon,lat],zoom});
+   else{const view=bound.getView();view.setCenter(project(lon,lat,projection(bound)));view.setZoom(zoom);}
    if(window.__virtualLocation)window.__virtualLocation.set(lat,lon);
    notify({type:'location-result',id,ok:true,map_state:'ready',total_ms:0,colony_ms:0,tiles_ms:0});return 'requested';
   }catch(ignored){return 'not-ready';}}

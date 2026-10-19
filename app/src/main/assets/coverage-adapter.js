@@ -54,6 +54,11 @@
   }
   window.__coverageAdapter = Object.freeze({
     ready(){return attach();},
+    snapshot() {
+      if (!attach()) return null;
+      const p=boundMap.containerPointToLatLng(boundMap.getSize().divideBy(2));
+      return {lat:p.lat,lon:p.lng,zoom:boundMap.getZoom()};
+    },
     center() {
       if (!attach()) return false;
       const p = boundMap.containerPointToLatLng(boundMap.getSize().divideBy(2));
@@ -70,13 +75,13 @@
         maxLon: b.getEast()
       });
     },
-    query(lat, lon, id=0) {
+    query(lat, lon, id=0, zoom=18) {
       if (!window.__virtualLocation || !attach()) return 'not-ready';
       const button = document.querySelector(window.__mapProvider.locateControl);
       if (!button) return 'missing-control';
       // Keep the selected view through the site's later fit-to-colony response.
       feedback.start(id,lat,lon);
-      viewport.start(lat,lon,18);
+      viewport.start(lat,lon,Math.max(5,Math.min(20,zoom)));
       window.__virtualLocation.set(lat,lon);
       if (window.__virtualLocation.watchCount() === 0) button.click();
       return 'requested';
